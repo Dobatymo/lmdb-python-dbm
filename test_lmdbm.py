@@ -4,12 +4,13 @@ from unittest import TestCase
 from genutility.test import MyTestCase
 from lmdb import Error
 
-from lmdbm import Lmdb, remove_lmdbm
+from lmdbm import Lmdb
+from lmdbm.lmdbm import remove_lmdbm
 
 
 class LmdbmTests(MyTestCase):
 
-	_name = "test.db"
+	_name = "./test.db"
 
 	_dict = {
 		b"a": b"Python:",
@@ -45,7 +46,7 @@ class LmdbmTests(MyTestCase):
 
 		with self.assertRaises(Error):
 			with Lmdb.open(self._name, "r", map_size=1024) as db:
-				db[key] = value
+				db["key"] = "value"
 
 		assert not Path(self._name).exists()
 

@@ -1,5 +1,5 @@
 import logging
-from collections.abc import MutableMapping
+from collections.abc import MutableMapping, Mapping
 from gzip import compress, decompress
 from pathlib import Path
 from sys import exit
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import lmdb
 
 if TYPE_CHECKING:
-	from typing import Iterator, Tuple
+	from typing import Iterator, Tuple, Optional, Union
 
 class error(Exception):
 	pass
@@ -48,25 +48,25 @@ class Lmdb(MutableMapping):
 		self.env = env
 
 	@classmethod
-	def open(cls, file, flag="r", mode=0o666, map_size=2**20):
+	def open(cls, file, flag="r", mode=0o755, map_size=2**20):
 		# type: (str, str, int, int) -> Lmdb
 
 		"""
 			Opens the database `file`.
 			`flag`: r (read only, existing), w (read and write, existing),
 				c (read, write, create if not exists), n (read, write, overwrite existing)
-			`map_size`. Inital database size. Defaults to 2**20 (1MB).
+			`map_size`. Initial database size. Defaults to 2**20 (1MB).
 		"""
 
-		if flag == "r": # Open existing database for reading only (default)
+		if flag == "r":  # Open existing database for reading only (default)
 			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=True, create=False, mode=mode)
-		elif flag == "w": # Open existing database for reading and writing
-			env = lmdb.open(file, map_size=map_size, max_dbs=1, create=False, mode=mode)
-		elif flag == "c": # Open database for reading and writing, creating it if it doesn’t exist
-			env = lmdb.open(file, map_size=map_size, max_dbs=1, create=True, mode=mode)
-		elif flag == "n": # Always create a new, empty database, open for reading and writing
+		elif flag == "w":  # Open existing database for reading and writing
+			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=False, mode=mode)
+		elif flag == "c":  # Open database for reading and writing, creating it if it doesn’t exist
+			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=True, mode=mode)
+		elif flag == "n":  # Always create a new, empty database, open for reading and writing
 			remove_lmdbm(file)
-			env = lmdb.open(file, map_size=map_size, max_dbs=1, create=True, mode=mode)
+			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=True, mode=mode)
 		else:
 			raise ValueError("Invalid flag")
 
@@ -177,6 +177,33 @@ class Lmdb(MutableMapping):
 			return default
 		return self._post_value(value)
 
+	def update(self, __other=(), **kwds):  # python3.8 only: update(self, other=(), /, **kwds)
+
+		for i in range(12):
+			try:
+				with self.env.begin(write=True) as txn:
+					with txn.cursor() as curs:
+						if isinstance(__other, Mapping):
+							pairs = [(self._pre_key(key), self._pre_value(__other[key])) for key in __other]
+							curs.putmulti(pairs)
+						elif hasattr(__other, "keys"):
+							pairs = [(self._pre_key(key), self._pre_value(__other[key])) for key in __other.keys()]
+							curs.putmulti(pairs)
+						else:
+							pairs = [(self._pre_key(key), self._pre_value(value)) for key, value in __other]
+							curs.putmulti(pairs)
+
+						pairs = [(self._pre_key(key), self._pre_value(value)) for key, value in kwds.items()]
+						curs.putmulti(pairs)
+
+						return
+			except lmdb.MapFullError:
+				new_map_size = self.map_size * 2
+				self.env.set_mapsize(new_map_size)
+				logging.info("Grew database map size to %s", new_map_size)
+
+		exit("Failed to grow lmdb")
+
 	def sync(self):
 		# type: () -> None
 
@@ -219,5 +246,5 @@ class LmdbGzip(Lmdb):
 
 		return decompress(value)
 
-def open(file, flag="r", mode=0o666):
+def open(file, flag="r", mode=0o755):
 	return LmdbGzip.open(file, flag, mode)

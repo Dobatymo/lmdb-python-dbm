@@ -62,7 +62,7 @@ class Lmdb(MutableMapping):
 			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=True, create=False, mode=mode)
 		elif flag == "w":  # Open existing database for reading and writing
 			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=False, mode=mode)
-		elif flag == "c":  # Open database for reading and writing, creating it if it doesn’t exist
+		elif flag == "c":  # Open database for reading and writing, creating it if it doesn't exist
 			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=True, mode=mode)
 		elif flag == "n":  # Always create a new, empty database, open for reading and writing
 			remove_lmdbm(file)

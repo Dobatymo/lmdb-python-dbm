@@ -1,5 +1,5 @@
 import logging
-from collections.abc import MutableMapping, Mapping
+from collections.abc import Mapping, MutableMapping
 from gzip import compress, decompress
 from pathlib import Path
 from sys import exit
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import lmdb
 
 if TYPE_CHECKING:
-	from typing import Iterator, Tuple, Optional, Union
+	from typing import Iterator, Optional, Tuple, Union
 
 class error(Exception):
 	pass
@@ -48,8 +48,8 @@ class Lmdb(MutableMapping):
 		self.env = env
 
 	@classmethod
-	def open(cls, file, flag="r", mode=0o755, map_size=2**20):
-		# type: (str, str, int, int) -> Lmdb
+	def open(cls, file, flag="r", mode=0o755, map_size=2**20, **kwargs):
+		# type: (str, str, int, int, **Any) -> Lmdb
 
 		"""
 			Opens the database `file`.
@@ -70,7 +70,7 @@ class Lmdb(MutableMapping):
 		else:
 			raise ValueError("Invalid flag")
 
-		return cls(env)
+		return cls(env, **kwargs)
 
 	@property
 	def map_size(self):
@@ -79,7 +79,10 @@ class Lmdb(MutableMapping):
 		return self.env.info()["map_size"]
 
 	def _pre_key(self, key):
-		# type: (bytes, ) -> bytes
+		# type: (Union[bytes, str], ) -> bytes
+
+		if isinstance(key, str):
+			return key.encode("Latin-1")
 
 		return key
 
@@ -89,7 +92,10 @@ class Lmdb(MutableMapping):
 		return key
 
 	def _pre_value(self, value):
-		# type: (bytes, ) -> bytes
+		# type: (Union[bytes, str], ) -> bytes
+
+		if isinstance(value, str):
+			return key.encode("Latin-1")
 
 		return value
 
@@ -99,7 +105,7 @@ class Lmdb(MutableMapping):
 		return value
 
 	def __getitem__(self, key):
-		# type: (bytes, ) -> bytes
+		# type: (Union[bytes, str], ) -> bytes
 
 		with self.env.begin() as txn:
 			value = txn.get(self._pre_key(key))
@@ -108,7 +114,7 @@ class Lmdb(MutableMapping):
 		return self._post_value(value)
 
 	def __setitem__(self, key, value):
-		# type: (bytes, bytes) -> None
+		# type: (Union[bytes, str], Union[bytes, str]) -> None
 
 		k = self._pre_key(key)
 		v = self._pre_value(value)
@@ -124,7 +130,7 @@ class Lmdb(MutableMapping):
 		exit("Failed to grow lmdb")
 
 	def __delitem__(self, key):
-		# type: (bytes, ) -> None
+		# type: (Union[bytes, str], ) -> None
 
 		with self.env.begin(write=True) as txn:
 			txn.delete(self._pre_key(key))
@@ -151,7 +157,7 @@ class Lmdb(MutableMapping):
 				yield self._post_value(value)
 
 	def __contains__(self, key):
-		# type: (bytes, ) -> bool
+		# type: (Union[bytes, str], ) -> bool
 
 		with self.env.begin() as txn:
 			value = txn.get(self._pre_key(key))
@@ -169,7 +175,7 @@ class Lmdb(MutableMapping):
 			return txn.stat()["entries"]
 
 	def pop(self, key, default=None):
-		# type: (bytes, Optional[bytes]) -> bytes
+		# type: (Union[bytes, str], Optional[bytes]) -> bytes
 
 		with self.env.begin(write=True) as txn:
 			value = txn.pop(self._pre_key(key))
@@ -178,6 +184,14 @@ class Lmdb(MutableMapping):
 		return self._post_value(value)
 
 	def update(self, __other=(), **kwds):  # python3.8 only: update(self, other=(), /, **kwds)
+		# type: (Any, **Union[bytes, str]) -> None
+
+		# fixme: `kwds`
+
+		# note: benchmarking showed that there is no real difference between using lists or iterables
+		# as input to `putmulti`.
+		# lists: Finished 14412594 in 253496 seconds.
+		# iter:  Finished 14412594 in 256315 seconds.
 
 		for i in range(12):
 			try:
@@ -226,19 +240,10 @@ class LmdbGzip(Lmdb):
 		Lmdb.__init__(self, env)
 		self.compresslevel = compresslevel
 
-	def _pre_key(self, key):
-		# type: (Union[bytes, str], ) -> bytes
-
-		if isinstance(key, str):
-			return key.encode("Latin-1")
-
-		return key
-
 	def _pre_value(self, value):
 		# type: (Union[bytes, str], ) -> bytes
 
-		if isinstance(value, str):
-			value = value.encode("utf-8")
+		value = Lmdb._pre_value(self, value)
 		return compress(value, self.compresslevel)
 
 	def _post_value(self, value):

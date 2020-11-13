@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import lmdb
 
 if TYPE_CHECKING:
-	from typing import Iterator, Optional, Tuple, Union
+	from typing import Any, Iterator, Optional, Tuple, Union
 
 class error(Exception):
 	pass
@@ -95,7 +95,7 @@ class Lmdb(MutableMapping):
 		# type: (Union[bytes, str], ) -> bytes
 
 		if isinstance(value, str):
-			return key.encode("Latin-1")
+			return value.encode("Latin-1")
 
 		return value
 
@@ -252,4 +252,4 @@ class LmdbGzip(Lmdb):
 		return decompress(value)
 
 def open(file, flag="r", mode=0o755):
-	return LmdbGzip.open(file, flag, mode)
+	return Lmdb.open(file, flag, mode)

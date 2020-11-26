@@ -42,6 +42,22 @@ class LmdbmTests(MyTestCase):
 
 		self._delete_db()
 
+	def test_mem_grow_batch(self):
+
+		value = b"asd"*1000
+
+		def data():
+			yield "key_1", value
+			yield "key_2", value
+
+		with Lmdb.open(self._name, "n", map_size=1024) as db:
+
+			db.update(data())
+			assert db["key_1"] == value
+			assert db["key_2"] == value
+
+		self._delete_db()
+
 	def test_missing_read_only(self):
 
 		with self.assertRaises(Error):

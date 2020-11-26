@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 import lmdb
 
 if TYPE_CHECKING:
-	from typing import Any, Iterator, Optional, Tuple, Union
+	from typing import Any, Iterator, List, Optional, Tuple, TypeVar, Union
+	T = TypeVar("T")
+	KT = Union[bytes, str] # TypeVar("KT")
+	VT = Union[bytes, str] # TypeVar("VT")
 
 class error(Exception):
 	pass
@@ -48,8 +51,8 @@ class Lmdb(MutableMapping):
 		self.env = env
 
 	@classmethod
-	def open(cls, file, flag="r", mode=0o755, map_size=2**20, **kwargs):
-		# type: (str, str, int, int, **Any) -> Lmdb
+	def open(cls, file, flag="r", mode=0o755, map_size=2**20):
+		# type: (str, str, int, int) -> Lmdb
 
 		"""
 			Opens the database `file`.
@@ -70,7 +73,7 @@ class Lmdb(MutableMapping):
 		else:
 			raise ValueError("Invalid flag")
 
-		return cls(env, **kwargs)
+		return cls(env)
 
 	@property
 	def map_size(self):
@@ -79,33 +82,37 @@ class Lmdb(MutableMapping):
 		return self.env.info()["map_size"]
 
 	def _pre_key(self, key):
-		# type: (Union[bytes, str], ) -> bytes
+		# type: (object, ) -> bytes
 
-		if isinstance(key, str):
+		if isinstance(key, bytes):
+			return key
+		elif isinstance(key, str):
 			return key.encode("Latin-1")
 
-		return key
+		raise TypeError
 
 	def _post_key(self, key):
-		# type: (bytes, ) -> bytes
+		# type: (bytes, ) -> KT
 
 		return key
 
 	def _pre_value(self, value):
-		# type: (Union[bytes, str], ) -> bytes
+		# type: (VT, ) -> bytes
 
-		if isinstance(value, str):
+		if isinstance(value, bytes):
+			return value
+		elif isinstance(value, str):
 			return value.encode("Latin-1")
 
-		return value
+		raise TypeError
 
 	def _post_value(self, value):
-		# type: (bytes, ) -> bytes
+		# type: (bytes, ) -> VT
 
 		return value
 
 	def __getitem__(self, key):
-		# type: (Union[bytes, str], ) -> bytes
+		# type: (KT, ) -> VT
 
 		with self.env.begin() as txn:
 			value = txn.get(self._pre_key(key))
@@ -114,7 +121,7 @@ class Lmdb(MutableMapping):
 		return self._post_value(value)
 
 	def __setitem__(self, key, value):
-		# type: (Union[bytes, str], Union[bytes, str]) -> None
+		# type: (KT, VT) -> None
 
 		k = self._pre_key(key)
 		v = self._pre_value(value)
@@ -130,41 +137,41 @@ class Lmdb(MutableMapping):
 		exit("Failed to grow lmdb")
 
 	def __delitem__(self, key):
-		# type: (Union[bytes, str], ) -> None
+		# type: (KT, ) -> None
 
 		with self.env.begin(write=True) as txn:
 			txn.delete(self._pre_key(key))
 
 	def keys(self):
-		# type: () -> Iterator[bytes]
+		# type: () -> Iterator[KT]
 
 		with self.env.begin() as txn:
 			for key in txn.cursor().iternext(keys=True, values=False):
 				yield self._post_key(key)
 
 	def items(self):
-		# type: () -> Iterator[Tuple[bytes, bytes]]
+		# type: () -> Iterator[Tuple[KT, VT]]
 
 		with self.env.begin() as txn:
 			for key, value in txn.cursor().iternext(keys=True, values=True):
 				yield (self._post_key(key), self._post_value(value))
 
 	def values(self):
-		# type: () -> Iterator[bytes]
+		# type: () -> Iterator[VT]
 
 		with self.env.begin() as txn:
 			for value in txn.cursor().iternext(keys=False, values=True):
 				yield self._post_value(value)
 
 	def __contains__(self, key):
-		# type: (Union[bytes, str], ) -> bool
+		# type: (object, ) -> bool
 
 		with self.env.begin() as txn:
 			value = txn.get(self._pre_key(key))
 		return value is not None
 
 	def __iter__(self):
-		# type: () -> Iterator[bytes]
+		# type: () -> Iterator[KT]
 
 		return self.keys()
 
@@ -174,8 +181,8 @@ class Lmdb(MutableMapping):
 		with self.env.begin() as txn:
 			return txn.stat()["entries"]
 
-	def pop(self, key, default=None):
-		# type: (Union[bytes, str], Optional[bytes]) -> bytes
+	def pop(self, key, default=object()):
+		# type: (KT, Union[VT, T]) -> Union[VT, T]
 
 		with self.env.begin(write=True) as txn:
 			value = txn.pop(self._pre_key(key))
@@ -184,7 +191,7 @@ class Lmdb(MutableMapping):
 		return self._post_value(value)
 
 	def update(self, __other=(), **kwds):  # python3.8 only: update(self, other=(), /, **kwds)
-		# type: (Any, **Union[bytes, str]) -> None
+		# type: (Any, **VT) -> None
 
 		# fixme: `kwds`
 
@@ -193,22 +200,28 @@ class Lmdb(MutableMapping):
 		# lists: Finished 14412594 in 253496 seconds.
 		# iter:  Finished 14412594 in 256315 seconds.
 
+		# save generated lists in case the insert fails and needs to be retried
+		# for performance reasons, but mostly because `__other` could be an iterable
+		# which would already be exhausted on the second try
+		pairs_other = None  # type: Optional[List[Tuple[bytes, bytes]]]
+		pairs_kwds = None  # type: Optional[List[Tuple[bytes, bytes]]]
+
 		for i in range(12):
 			try:
 				with self.env.begin(write=True) as txn:
 					with txn.cursor() as curs:
 						if isinstance(__other, Mapping):
-							pairs = [(self._pre_key(key), self._pre_value(__other[key])) for key in __other]
-							curs.putmulti(pairs)
+							pairs_other = pairs_other or [(self._pre_key(key), self._pre_value(__other[key])) for key in __other]
+							curs.putmulti(pairs_other)
 						elif hasattr(__other, "keys"):
-							pairs = [(self._pre_key(key), self._pre_value(__other[key])) for key in __other.keys()]
-							curs.putmulti(pairs)
+							pairs_other = pairs_other or [(self._pre_key(key), self._pre_value(__other[key])) for key in __other.keys()]
+							curs.putmulti(pairs_other)
 						else:
-							pairs = [(self._pre_key(key), self._pre_value(value)) for key, value in __other]
-							curs.putmulti(pairs)
+							pairs_other = pairs_other or [(self._pre_key(key), self._pre_value(value)) for key, value in __other]
+							curs.putmulti(pairs_other)
 
-						pairs = [(self._pre_key(key), self._pre_value(value)) for key, value in kwds.items()]
-						curs.putmulti(pairs)
+						pairs_kwds = pairs_kwds or [(self._pre_key(key), self._pre_value(value)) for key, value in kwds.items()]
+						curs.putmulti(pairs_kwds)
 
 						return
 			except lmdb.MapFullError:
@@ -241,13 +254,13 @@ class LmdbGzip(Lmdb):
 		self.compresslevel = compresslevel
 
 	def _pre_value(self, value):
-		# type: (Union[bytes, str], ) -> bytes
+		# type: (VT, ) -> bytes
 
 		value = Lmdb._pre_value(self, value)
 		return compress(value, self.compresslevel)
 
 	def _post_value(self, value):
-		# type: (bytes, ) -> bytes
+		# type: (bytes, ) -> VT
 
 		return decompress(value)
 

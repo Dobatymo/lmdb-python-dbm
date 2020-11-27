@@ -47,12 +47,12 @@ def remove_dbm(path):
 def run_bench(N, db_tpl):
 
 	batchsize = 1000
-	LMDB_FILE = db_tpl.format("lmdb")
+	LMDBM_FILE = db_tpl.format("lmdbm")
 	PYSOS_FILE = db_tpl.format("pysos")
 	SQLITEDICT_FILE = db_tpl.format("sqlitedict")
 	DBM_FILE = db_tpl.format("dbm")
 
-	remove_lmdbm(LMDB_FILE)
+	remove_lmdbm(LMDBM_FILE)
 	with suppress(FileNotFoundError):
 		os.unlink(PYSOS_FILE)
 	with suppress(FileNotFoundError):
@@ -63,21 +63,21 @@ def run_bench(N, db_tpl):
 	# writes
 
 	""" # without batch
-	with PrintStatementTime("lmdb (no batch) {} writes: {{delta:.02f}}".format(N)):
-		db = JsonLmdb.open(LMDB_FILE, "c")
+	with PrintStatementTime("lmdbm (no batch) {} writes: {{delta:.02f}}".format(N)):
+		db = JsonLmdb.open(LMDBM_FILE, "c")
 		for k, v in data(N):
 			db[k] = v
 		db.close()
 
-	remove_lmdbm(LMDB_FILE)
+	remove_lmdbm(LMDBM_FILE)
 	"""
 
 	with MeasureTime() as t:
-		with JsonLmdb.open(LMDB_FILE, "c") as db:
+		with JsonLmdb.open(LMDBM_FILE, "c") as db:
 			for pairs in batch(data(N), batchsize):
 				db.update(pairs)
-	ret["lmdb"]["write"] = t.get()
-	print("lmdb batch write", N, t.get())
+	ret["lmdbm"]["write"] = t.get()
+	print("lmdbm batch write", N, t.get())
 
 	with open(os.devnull, "w") as devnull:  # mute annoying "free lines" output
 		with redirect_stdout(devnull):
@@ -107,18 +107,18 @@ def run_bench(N, db_tpl):
 	# reads
 
 	with MeasureTime() as t:
-		with JsonLmdb.open(LMDB_FILE, "r") as db:
+		with JsonLmdb.open(LMDBM_FILE, "r") as db:
 			for k in allkeys(N):
 				a = db[k]
-	#ret["lmdb"]["read"] = t.get()
-	print("lmdb cont read", N, t.get())
+	#ret["lmdbm"]["read"] = t.get()
+	print("lmdbm cont read", N, t.get())
 
 	with MeasureTime() as t:
-		with JsonLmdb.open(LMDB_FILE, "r") as db:
+		with JsonLmdb.open(LMDBM_FILE, "r") as db:
 			for k in randkeys(N, N):
 				a = db[k]
-	ret["lmdb"]["read"] = t.get()
-	print("lmdb rand read", N, t.get())
+	ret["lmdbm"]["read"] = t.get()
+	print("lmdbm rand read", N, t.get())
 
 	with open(os.devnull, "w") as devnull:  # mute annoying "free lines" output
 		with redirect_stdout(devnull):

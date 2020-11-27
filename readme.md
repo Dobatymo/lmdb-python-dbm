@@ -43,8 +43,8 @@ See `benchmark.py`.
 
 ### 1. run
 
-# continous writes in seconds
-| items | lmdb  | pysos |sqlitedict|  dbm   |
+#### continuous writes in seconds
+| items | lmdbm | pysos |sqlitedict|  dbm   |
 |------:|------:|------:|---------:|-------:|
 |     10| 0.0160| 0.0000|   0.01500|  0.0160|
 |    100| 0.0000| 0.0000|   0.03100|  0.0940|
@@ -53,8 +53,8 @@ See `benchmark.py`.
 | 100000| 1.4820| 5.0700|  23.04100| 96.0030|
 |1000000|19.2820|51.5120| 212.75400|908.4870|
 
-# random reads in seconds
-| items | lmdb  | pysos |sqlitedict|  dbm   |
+#### random reads in seconds
+| items | lmdbm | pysos |sqlitedict|  dbm   |
 |------:|------:|------:|---------:|-------:|
 |     10| 0.0000| 0.0000|   0.01500|  0.0000|
 |    100| 0.0000| 0.0000|   0.07800|  0.1250|
@@ -65,8 +65,8 @@ See `benchmark.py`.
 
 ### 2. run
 
-# continous write in seconds
-| items | lmdb  | pysos |sqlitedict|   dbm   |
+#### continuous writes in seconds
+| items | lmdbm | pysos |sqlitedict|   dbm   |
 |------:|------:|------:|---------:|--------:|
 |     10| 0.0000| 0.0000|   0.01600|  0.01600|
 |    100| 0.0000| 0.0000|   0.01600|  0.09300|
@@ -75,8 +75,8 @@ See `benchmark.py`.
 | 100000| 1.5130| 4.9140|  20.71700| 86.86200|
 |1000000|18.1430|48.0950| 208.88600|878.16000|
 
-# random reads in seconds
-| items | lmdb  | pysos |sqlitedict|  dbm   |
+#### random reads in seconds
+| items | lmdbm | pysos |sqlitedict|  dbm   |
 |------:|------:|------:|---------:|-------:|
 |     10| 0.0000|  0.000|    0.0000|  0.0000|
 |    100| 0.0000|  0.000|    0.0630|  0.0150|

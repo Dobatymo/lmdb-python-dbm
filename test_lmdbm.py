@@ -1,5 +1,4 @@
 from pathlib import Path
-from unittest import TestCase
 
 from genutility.test import MyTestCase
 from lmdb import Error

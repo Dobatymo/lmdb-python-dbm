@@ -1,9 +1,7 @@
 import dbm
 import json
-import logging
 import os
 import os.path
-import time
 from collections import defaultdict
 from contextlib import redirect_stdout, suppress
 from random import randrange
@@ -109,14 +107,14 @@ def run_bench(N, db_tpl):
 	with MeasureTime() as t:
 		with JsonLmdb.open(LMDBM_FILE, "r") as db:
 			for k in allkeys(N):
-				a = db[k]
+				db[k]
 	#ret["lmdbm"]["read"] = t.get()
 	print("lmdbm cont read", N, t.get())
 
 	with MeasureTime() as t:
 		with JsonLmdb.open(LMDBM_FILE, "r") as db:
 			for k in randkeys(N, N):
-				a = db[k]
+				db[k]
 	ret["lmdbm"]["read"] = t.get()
 	print("lmdbm rand read", N, t.get())
 
@@ -125,7 +123,7 @@ def run_bench(N, db_tpl):
 			with MeasureTime() as t:
 				db = pysos.Dict(PYSOS_FILE)
 				for k in randkeys(N, N):
-					a = db[k]
+					db[k]
 				db.close()
 	ret["pysos"]["read"] = t.get()
 	print("pysos read", N, t.get())
@@ -133,14 +131,14 @@ def run_bench(N, db_tpl):
 	with MeasureTime() as t:
 		with SqliteDict(SQLITEDICT_FILE) as db:
 			for k in randkeys(N, N):
-				a = db[k]
+				db[k]
 	ret["sqlitedict"]["read"] = t.get()
 	print("sqlitedict read", N, t.get())
 
 	with MeasureTime() as t:
 		with dbm.open(DBM_FILE, "r") as db:
 			for k in randkeys(N, N):
-				a = json.loads(db[k])
+				json.loads(db[k])
 	ret["dbm"]["read"] = t.get()
 	print("dbm read", N, t.get())
 

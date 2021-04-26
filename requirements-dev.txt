@@ -1,4 +1,4 @@
-isort
-genutility
 bandit
 flake8
+genutility
+isort

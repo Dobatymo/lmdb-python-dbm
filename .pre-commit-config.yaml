@@ -1,6 +1,21 @@
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.4.0
+    hooks:
+      - id: check-json
+      - id: check-yaml
+      - id: check-toml
+      - id: check-case-conflict
+      - id: check-added-large-files
+      - id: debug-statements
+      - id: requirements-txt-fixer
+      - id: mixed-line-ending
+        args: ["--fix=no"]
+      - id: trailing-whitespace
+        args: ["--markdown-linebreak-ext=md"]
+      - id: end-of-file-fixer
   - repo: https://github.com/PyCQA/isort
-    rev: 5.6.4
+    rev: 5.7.0
     hooks:
       - id: isort
         language_version: python3

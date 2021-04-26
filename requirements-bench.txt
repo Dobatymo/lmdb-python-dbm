@@ -1,5 +1,5 @@
 genutility
-pytablewriter
-pysos==1.2.1
 lmdbm==0.0.4
+pysos==1.2.1
+pytablewriter
 sqlitedict==1.7.0

@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 	KT = Union[bytes, str] # TypeVar("KT")
 	VT = Union[bytes, str] # TypeVar("VT")
 
+logger = logging.getLogger(__name__)
+
 class error(Exception):
 	pass
 
@@ -133,7 +135,7 @@ class Lmdb(MutableMapping):
 			except lmdb.MapFullError:
 				new_map_size = self.map_size * 2
 				self.env.set_mapsize(new_map_size)
-				logging.info("Grew database map size to %s", new_map_size)
+				logger.info("Grew database map size to %s", new_map_size)
 		exit("Failed to grow lmdb")
 
 	def __delitem__(self, key):
@@ -227,7 +229,7 @@ class Lmdb(MutableMapping):
 			except lmdb.MapFullError:
 				new_map_size = self.map_size * 2
 				self.env.set_mapsize(new_map_size)
-				logging.info("Grew database map size to %s", new_map_size)
+				logger.info("Grew database map size to %s", new_map_size)
 
 		exit("Failed to grow lmdb")
 

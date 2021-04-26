@@ -39,7 +39,7 @@ with JsonLmdb.open("test.db", "c") as db:
 
 ## Benchmarks
 
-See `benchmark.py`.
+See `benchmark.py`. Other storage engines which could be tested: `semidbm`, `wiredtiger`, `UnQLite`, `vedis`, `tinydb`.
 
 ### 1. run
 

@@ -37,9 +37,15 @@ with JsonLmdb.open("test.db", "c") as db:
   print(obj["some"])  # prints "object"
 ```
 
+## Warning
+
+As of `lmdb==1.2.1` the docs say that calling `lmdb.Environment.set_mapsize` from multiple processes "may cause catastrophic loss of data". If `lmdbm` is used in write mode from multiple processes, set `autogrow=False` and map_size to a large enough value: `Lmdb.open(..., map_size=2**30, autogrow=False)`.
+
 ## Benchmarks
 
-See `benchmark.py`. Other storage engines which could be tested: `semidbm`, `wiredtiger`, `UnQLite`, `vedis`, `tinydb`.
+See `benchmark.py` and `requirements-bench.txt`. Other storage engines which could be tested: `wiredtiger`, `berkeleydb`.
+Storage engines not benchmarked:
+	- `tinydb` (because it doesn't have built-in str/bytes keys)
 
 ### 1. run
 

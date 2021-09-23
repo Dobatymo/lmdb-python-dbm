@@ -1,5 +1,8 @@
 genutility
 lmdbm==0.0.4
-pysos==1.2.1
-pytablewriter
+pysos==1.2.5
+pytablewriter==0.63.0
+semidbm==0.5.1
 sqlitedict==1.7.0
+unqlite==0.9.2
+vedis==0.7.1

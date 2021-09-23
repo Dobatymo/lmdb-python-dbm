@@ -47,20 +47,26 @@ def remove_lmdbm(file, missing_ok=True):
 
 class Lmdb(MutableMapping):
 
-	def __init__(self, env):
-		# type: (lmdb.Environment, ) -> None
+	autogrow_error = "Failed to grow LMDB ({}). Is there enough disk space available?"
+	autogrow_msg = "Grew database (%s) map size to %s"
+
+	def __init__(self, env, autogrow):
+		# type: (lmdb.Environment, bool) -> None
 
 		self.env = env
+		self.autogrow = autogrow
 
 	@classmethod
-	def open(cls, file, flag="r", mode=0o755, map_size=2**20):
-		# type: (str, str, int, int) -> Lmdb
+	def open(cls, file, flag="r", mode=0o755, map_size=2**20, autogrow=True):
+		# type: (str, str, int, int, bool) -> Lmdb
 
 		"""
 			Opens the database `file`.
 			`flag`: r (read only, existing), w (read and write, existing),
 				c (read, write, create if not exists), n (read, write, overwrite existing)
-			`map_size`. Initial database size. Defaults to 2**20 (1MB).
+			`map_size`: Initial database size. Defaults to 2**20 (1MB).
+			`autogrow`: Automatically grow the database size when `map_size` is exceeded.
+				WARNING: Set this to `False` for multi-process write access.
 		"""
 
 		if flag == "r":  # Open existing database for reading only (default)
@@ -75,13 +81,19 @@ class Lmdb(MutableMapping):
 		else:
 			raise ValueError("Invalid flag")
 
-		return cls(env)
+		return cls(env, autogrow)
 
 	@property
 	def map_size(self):
 		# type: () -> int
 
 		return self.env.info()["map_size"]
+
+	@map_size.setter
+	def map_size(self, value):
+		# type: (int, ) -> None
+
+		self.env.set_mapsize(value)
 
 	def _pre_key(self, key):
 		# type: (object, ) -> bytes
@@ -133,10 +145,13 @@ class Lmdb(MutableMapping):
 					txn.put(k, v)
 					return
 			except lmdb.MapFullError:
+				if not self.autogrow:
+					raise
 				new_map_size = self.map_size * 2
-				self.env.set_mapsize(new_map_size)
-				logger.info("Grew database map size to %s", new_map_size)
-		exit("Failed to grow lmdb")
+				self.map_size = new_map_size
+				logger.info(self.autogrow_msg, self.env.path(), new_map_size)
+
+		exit(self.autogrow_error.format(self.env.path()))
 
 	def __delitem__(self, key):
 		# type: (KT, ) -> None
@@ -227,11 +242,13 @@ class Lmdb(MutableMapping):
 
 						return
 			except lmdb.MapFullError:
+				if not self.autogrow:
+					raise
 				new_map_size = self.map_size * 2
-				self.env.set_mapsize(new_map_size)
-				logger.info("Grew database map size to %s", new_map_size)
+				self.map_size = new_map_size
+				logger.info(self.autogrow_msg, self.env.path(), new_map_size)
 
-		exit("Failed to grow lmdb")
+		exit(self.autogrow_error.format(self.env.path()))
 
 	def sync(self):
 		# type: () -> None

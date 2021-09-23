@@ -13,6 +13,11 @@ repos:
       - id: trailing-whitespace
         args: ["--markdown-linebreak-ext=md"]
       - id: end-of-file-fixer
+  - repo: https://github.com/psf/black
+    rev: 21.9b0
+    hooks:
+      - id: black
+        language_version: python3 # Should be a command that runs python3.6+
   - repo: https://github.com/PyCQA/isort
     rev: 5.9.3
     hooks:

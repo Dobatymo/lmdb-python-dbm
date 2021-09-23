@@ -8,280 +8,294 @@ from typing import TYPE_CHECKING
 import lmdb
 
 if TYPE_CHECKING:
-	from typing import Any, Iterator, List, Optional, Tuple, TypeVar, Union
-	T = TypeVar("T")
-	KT = Union[bytes, str] # TypeVar("KT")
-	VT = Union[bytes, str] # TypeVar("VT")
+    from typing import Any, Iterator, List, Optional, Tuple, TypeVar, Union
+
+    T = TypeVar("T")
+    KT = Union[bytes, str]  # TypeVar("KT")
+    VT = Union[bytes, str]  # TypeVar("VT")
 
 logger = logging.getLogger(__name__)
 
+
 class error(Exception):
-	pass
+    pass
+
 
 class MissingOk(object):
 
-	# for python < 3.8 compatibility
+    # for python < 3.8 compatibility
 
-	def __init__(self, ok):
-		# type: (bool, ) -> None
+    def __init__(self, ok):
+        # type: (bool, ) -> None
 
-		self.ok = ok
+        self.ok = ok
 
-	def __enter__(self):
-		return self
+    def __enter__(self):
+        return self
 
-	def __exit__(self, exc_type, exc_value, traceback):
-		if isinstance(exc_value, FileNotFoundError) and self.ok:
-			return True
+    def __exit__(self, exc_type, exc_value, traceback):
+        if isinstance(exc_value, FileNotFoundError) and self.ok:
+            return True
+
 
 def remove_lmdbm(file, missing_ok=True):
-	# type: (str, bool) -> None
+    # type: (str, bool) -> None
 
-	base = Path(file)
-	with MissingOk(missing_ok):
-		(base / "data.mdb").unlink()
-	with MissingOk(missing_ok):
-		(base / "lock.mdb").unlink()
-	with MissingOk(missing_ok):
-		base.rmdir()
+    base = Path(file)
+    with MissingOk(missing_ok):
+        (base / "data.mdb").unlink()
+    with MissingOk(missing_ok):
+        (base / "lock.mdb").unlink()
+    with MissingOk(missing_ok):
+        base.rmdir()
+
 
 class Lmdb(MutableMapping):
 
-	autogrow_error = "Failed to grow LMDB ({}). Is there enough disk space available?"
-	autogrow_msg = "Grew database (%s) map size to %s"
+    autogrow_error = "Failed to grow LMDB ({}). Is there enough disk space available?"
+    autogrow_msg = "Grew database (%s) map size to %s"
 
-	def __init__(self, env, autogrow):
-		# type: (lmdb.Environment, bool) -> None
+    def __init__(self, env, autogrow):
+        # type: (lmdb.Environment, bool) -> None
 
-		self.env = env
-		self.autogrow = autogrow
+        self.env = env
+        self.autogrow = autogrow
 
-	@classmethod
-	def open(cls, file, flag="r", mode=0o755, map_size=2**20, autogrow=True):
-		# type: (str, str, int, int, bool) -> Lmdb
+    @classmethod
+    def open(cls, file, flag="r", mode=0o755, map_size=2 ** 20, autogrow=True):
+        # type: (str, str, int, int, bool) -> Lmdb
 
-		"""
-			Opens the database `file`.
-			`flag`: r (read only, existing), w (read and write, existing),
-				c (read, write, create if not exists), n (read, write, overwrite existing)
-			`map_size`: Initial database size. Defaults to 2**20 (1MB).
-			`autogrow`: Automatically grow the database size when `map_size` is exceeded.
-				WARNING: Set this to `False` for multi-process write access.
-		"""
+        """
+        Opens the database `file`.
+        `flag`: r (read only, existing), w (read and write, existing),
+                c (read, write, create if not exists), n (read, write, overwrite existing)
+        `map_size`: Initial database size. Defaults to 2**20 (1MB).
+        `autogrow`: Automatically grow the database size when `map_size` is exceeded.
+                WARNING: Set this to `False` for multi-process write access.
+        """
 
-		if flag == "r":  # Open existing database for reading only (default)
-			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=True, create=False, mode=mode)
-		elif flag == "w":  # Open existing database for reading and writing
-			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=False, mode=mode)
-		elif flag == "c":  # Open database for reading and writing, creating it if it doesn't exist
-			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=True, mode=mode)
-		elif flag == "n":  # Always create a new, empty database, open for reading and writing
-			remove_lmdbm(file)
-			env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=True, mode=mode)
-		else:
-			raise ValueError("Invalid flag")
+        if flag == "r":  # Open existing database for reading only (default)
+            env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=True, create=False, mode=mode)
+        elif flag == "w":  # Open existing database for reading and writing
+            env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=False, mode=mode)
+        elif flag == "c":  # Open database for reading and writing, creating it if it doesn't exist
+            env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=True, mode=mode)
+        elif flag == "n":  # Always create a new, empty database, open for reading and writing
+            remove_lmdbm(file)
+            env = lmdb.open(file, map_size=map_size, max_dbs=1, readonly=False, create=True, mode=mode)
+        else:
+            raise ValueError("Invalid flag")
 
-		return cls(env, autogrow)
+        return cls(env, autogrow)
 
-	@property
-	def map_size(self):
-		# type: () -> int
+    @property
+    def map_size(self):
+        # type: () -> int
 
-		return self.env.info()["map_size"]
+        return self.env.info()["map_size"]
 
-	@map_size.setter
-	def map_size(self, value):
-		# type: (int, ) -> None
+    @map_size.setter
+    def map_size(self, value):
+        # type: (int, ) -> None
 
-		self.env.set_mapsize(value)
+        self.env.set_mapsize(value)
 
-	def _pre_key(self, key):
-		# type: (object, ) -> bytes
+    def _pre_key(self, key):
+        # type: (object, ) -> bytes
 
-		if isinstance(key, bytes):
-			return key
-		elif isinstance(key, str):
-			return key.encode("Latin-1")
+        if isinstance(key, bytes):
+            return key
+        elif isinstance(key, str):
+            return key.encode("Latin-1")
 
-		raise TypeError
+        raise TypeError
 
-	def _post_key(self, key):
-		# type: (bytes, ) -> KT
+    def _post_key(self, key):
+        # type: (bytes, ) -> KT
 
-		return key
+        return key
 
-	def _pre_value(self, value):
-		# type: (VT, ) -> bytes
+    def _pre_value(self, value):
+        # type: (VT, ) -> bytes
 
-		if isinstance(value, bytes):
-			return value
-		elif isinstance(value, str):
-			return value.encode("Latin-1")
+        if isinstance(value, bytes):
+            return value
+        elif isinstance(value, str):
+            return value.encode("Latin-1")
 
-		raise TypeError
+        raise TypeError
 
-	def _post_value(self, value):
-		# type: (bytes, ) -> VT
+    def _post_value(self, value):
+        # type: (bytes, ) -> VT
 
-		return value
+        return value
 
-	def __getitem__(self, key):
-		# type: (KT, ) -> VT
+    def __getitem__(self, key):
+        # type: (KT, ) -> VT
 
-		with self.env.begin() as txn:
-			value = txn.get(self._pre_key(key))
-		if value is None:
-			raise KeyError(key)
-		return self._post_value(value)
+        with self.env.begin() as txn:
+            value = txn.get(self._pre_key(key))
+        if value is None:
+            raise KeyError(key)
+        return self._post_value(value)
 
-	def __setitem__(self, key, value):
-		# type: (KT, VT) -> None
+    def __setitem__(self, key, value):
+        # type: (KT, VT) -> None
 
-		k = self._pre_key(key)
-		v = self._pre_value(value)
-		for i in range(12):
-			try:
-				with self.env.begin(write=True) as txn:
-					txn.put(k, v)
-					return
-			except lmdb.MapFullError:
-				if not self.autogrow:
-					raise
-				new_map_size = self.map_size * 2
-				self.map_size = new_map_size
-				logger.info(self.autogrow_msg, self.env.path(), new_map_size)
+        k = self._pre_key(key)
+        v = self._pre_value(value)
+        for i in range(12):
+            try:
+                with self.env.begin(write=True) as txn:
+                    txn.put(k, v)
+                    return
+            except lmdb.MapFullError:
+                if not self.autogrow:
+                    raise
+                new_map_size = self.map_size * 2
+                self.map_size = new_map_size
+                logger.info(self.autogrow_msg, self.env.path(), new_map_size)
 
-		exit(self.autogrow_error.format(self.env.path()))
+        exit(self.autogrow_error.format(self.env.path()))
 
-	def __delitem__(self, key):
-		# type: (KT, ) -> None
+    def __delitem__(self, key):
+        # type: (KT, ) -> None
 
-		with self.env.begin(write=True) as txn:
-			txn.delete(self._pre_key(key))
+        with self.env.begin(write=True) as txn:
+            txn.delete(self._pre_key(key))
 
-	def keys(self):
-		# type: () -> Iterator[KT]
+    def keys(self):
+        # type: () -> Iterator[KT]
 
-		with self.env.begin() as txn:
-			for key in txn.cursor().iternext(keys=True, values=False):
-				yield self._post_key(key)
+        with self.env.begin() as txn:
+            for key in txn.cursor().iternext(keys=True, values=False):
+                yield self._post_key(key)
 
-	def items(self):
-		# type: () -> Iterator[Tuple[KT, VT]]
+    def items(self):
+        # type: () -> Iterator[Tuple[KT, VT]]
 
-		with self.env.begin() as txn:
-			for key, value in txn.cursor().iternext(keys=True, values=True):
-				yield (self._post_key(key), self._post_value(value))
+        with self.env.begin() as txn:
+            for key, value in txn.cursor().iternext(keys=True, values=True):
+                yield (self._post_key(key), self._post_value(value))
 
-	def values(self):
-		# type: () -> Iterator[VT]
+    def values(self):
+        # type: () -> Iterator[VT]
 
-		with self.env.begin() as txn:
-			for value in txn.cursor().iternext(keys=False, values=True):
-				yield self._post_value(value)
+        with self.env.begin() as txn:
+            for value in txn.cursor().iternext(keys=False, values=True):
+                yield self._post_value(value)
 
-	def __contains__(self, key):
-		# type: (object, ) -> bool
+    def __contains__(self, key):
+        # type: (object, ) -> bool
 
-		with self.env.begin() as txn:
-			value = txn.get(self._pre_key(key))
-		return value is not None
+        with self.env.begin() as txn:
+            value = txn.get(self._pre_key(key))
+        return value is not None
 
-	def __iter__(self):
-		# type: () -> Iterator[KT]
+    def __iter__(self):
+        # type: () -> Iterator[KT]
 
-		return self.keys()
+        return self.keys()
 
-	def __len__(self):
-		# type: () -> int
+    def __len__(self):
+        # type: () -> int
 
-		with self.env.begin() as txn:
-			return txn.stat()["entries"]
+        with self.env.begin() as txn:
+            return txn.stat()["entries"]
 
-	def pop(self, key, default=object()):
-		# type: (KT, Union[VT, T]) -> Union[VT, T]
+    def pop(self, key, default=object()):
+        # type: (KT, Union[VT, T]) -> Union[VT, T]
 
-		with self.env.begin(write=True) as txn:
-			value = txn.pop(self._pre_key(key))
-		if value is None:
-			return default
-		return self._post_value(value)
+        with self.env.begin(write=True) as txn:
+            value = txn.pop(self._pre_key(key))
+        if value is None:
+            return default
+        return self._post_value(value)
 
-	def update(self, __other=(), **kwds):  # python3.8 only: update(self, other=(), /, **kwds)
-		# type: (Any, **VT) -> None
+    def update(self, __other=(), **kwds):  # python3.8 only: update(self, other=(), /, **kwds)
+        # type: (Any, **VT) -> None
 
-		# fixme: `kwds`
+        # fixme: `kwds`
 
-		# note: benchmarking showed that there is no real difference between using lists or iterables
-		# as input to `putmulti`.
-		# lists: Finished 14412594 in 253496 seconds.
-		# iter:  Finished 14412594 in 256315 seconds.
+        # note: benchmarking showed that there is no real difference between using lists or iterables
+        # as input to `putmulti`.
+        # lists: Finished 14412594 in 253496 seconds.
+        # iter:  Finished 14412594 in 256315 seconds.
 
-		# save generated lists in case the insert fails and needs to be retried
-		# for performance reasons, but mostly because `__other` could be an iterable
-		# which would already be exhausted on the second try
-		pairs_other = None  # type: Optional[List[Tuple[bytes, bytes]]]
-		pairs_kwds = None  # type: Optional[List[Tuple[bytes, bytes]]]
+        # save generated lists in case the insert fails and needs to be retried
+        # for performance reasons, but mostly because `__other` could be an iterable
+        # which would already be exhausted on the second try
+        pairs_other = None  # type: Optional[List[Tuple[bytes, bytes]]]
+        pairs_kwds = None  # type: Optional[List[Tuple[bytes, bytes]]]
 
-		for i in range(12):
-			try:
-				with self.env.begin(write=True) as txn:
-					with txn.cursor() as curs:
-						if isinstance(__other, Mapping):
-							pairs_other = pairs_other or [(self._pre_key(key), self._pre_value(__other[key])) for key in __other]
-							curs.putmulti(pairs_other)
-						elif hasattr(__other, "keys"):
-							pairs_other = pairs_other or [(self._pre_key(key), self._pre_value(__other[key])) for key in __other.keys()]
-							curs.putmulti(pairs_other)
-						else:
-							pairs_other = pairs_other or [(self._pre_key(key), self._pre_value(value)) for key, value in __other]
-							curs.putmulti(pairs_other)
+        for i in range(12):
+            try:
+                with self.env.begin(write=True) as txn:
+                    with txn.cursor() as curs:
+                        if isinstance(__other, Mapping):
+                            pairs_other = pairs_other or [
+                                (self._pre_key(key), self._pre_value(__other[key])) for key in __other
+                            ]
+                            curs.putmulti(pairs_other)
+                        elif hasattr(__other, "keys"):
+                            pairs_other = pairs_other or [
+                                (self._pre_key(key), self._pre_value(__other[key])) for key in __other.keys()
+                            ]
+                            curs.putmulti(pairs_other)
+                        else:
+                            pairs_other = pairs_other or [
+                                (self._pre_key(key), self._pre_value(value)) for key, value in __other
+                            ]
+                            curs.putmulti(pairs_other)
 
-						pairs_kwds = pairs_kwds or [(self._pre_key(key), self._pre_value(value)) for key, value in kwds.items()]
-						curs.putmulti(pairs_kwds)
+                        pairs_kwds = pairs_kwds or [
+                            (self._pre_key(key), self._pre_value(value)) for key, value in kwds.items()
+                        ]
+                        curs.putmulti(pairs_kwds)
 
-						return
-			except lmdb.MapFullError:
-				if not self.autogrow:
-					raise
-				new_map_size = self.map_size * 2
-				self.map_size = new_map_size
-				logger.info(self.autogrow_msg, self.env.path(), new_map_size)
+                        return
+            except lmdb.MapFullError:
+                if not self.autogrow:
+                    raise
+                new_map_size = self.map_size * 2
+                self.map_size = new_map_size
+                logger.info(self.autogrow_msg, self.env.path(), new_map_size)
 
-		exit(self.autogrow_error.format(self.env.path()))
+        exit(self.autogrow_error.format(self.env.path()))
 
-	def sync(self):
-		# type: () -> None
+    def sync(self):
+        # type: () -> None
 
-		self.env.sync()
+        self.env.sync()
 
-	def close(self):
-		# type: () -> None
+    def close(self):
+        # type: () -> None
 
-		self.env.close()
+        self.env.close()
 
-	def __enter__(self):
-		return self
+    def __enter__(self):
+        return self
 
-	def __exit__(self, *args):
-		self.close()
+    def __exit__(self, *args):
+        self.close()
+
 
 class LmdbGzip(Lmdb):
+    def __init__(self, env, compresslevel=9):
+        Lmdb.__init__(self, env)
+        self.compresslevel = compresslevel
 
-	def __init__(self, env, compresslevel=9):
-		Lmdb.__init__(self, env)
-		self.compresslevel = compresslevel
+    def _pre_value(self, value):
+        # type: (VT, ) -> bytes
 
-	def _pre_value(self, value):
-		# type: (VT, ) -> bytes
+        value = Lmdb._pre_value(self, value)
+        return compress(value, self.compresslevel)
 
-		value = Lmdb._pre_value(self, value)
-		return compress(value, self.compresslevel)
+    def _post_value(self, value):
+        # type: (bytes, ) -> VT
 
-	def _post_value(self, value):
-		# type: (bytes, ) -> VT
+        return decompress(value)
 
-		return decompress(value)
 
 def open(file, flag="r", mode=0o755):
-	return Lmdb.open(file, flag, mode)
+    return Lmdb.open(file, flag, mode)

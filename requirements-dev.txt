@@ -1,4 +1,4 @@
-bandit
+bandit>=1.7.0
 flake8
 genutility
 isort

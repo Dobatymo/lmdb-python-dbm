@@ -1,5 +1,5 @@
 genutility
-lmdbm==0.0.4
+lmdbm==0.0.5
 pysos==1.2.5
 pytablewriter==0.63.0
 semidbm==0.5.1

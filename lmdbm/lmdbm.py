@@ -1,20 +1,21 @@
+from __future__ import generator_stop
+
 import logging
 from collections.abc import Mapping, MutableMapping
 from gzip import compress, decompress
 from pathlib import Path
 from sys import exit
-from typing import TYPE_CHECKING
+from typing import Any, Generic, Iterator, List, Optional, Tuple, TypeVar, Union
 
 import lmdb
 
-if TYPE_CHECKING:
-    from typing import Any, Iterator, List, Optional, Tuple, TypeVar, Union
-
-    T = TypeVar("T")
-    KT = Union[bytes, str]  # TypeVar("KT")
-    VT = Union[bytes, str]  # TypeVar("VT")
+T = TypeVar("T")
+KT = TypeVar("KT")
+VT = TypeVar("VT")
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT = object()
 
 
 class error(Exception):
@@ -25,8 +26,7 @@ class MissingOk(object):
 
     # for python < 3.8 compatibility
 
-    def __init__(self, ok):
-        # type: (bool, ) -> None
+    def __init__(self, ok: bool) -> None:
 
         self.ok = ok
 
@@ -38,8 +38,7 @@ class MissingOk(object):
             return True
 
 
-def remove_lmdbm(file, missing_ok=True):
-    # type: (str, bool) -> None
+def remove_lmdbm(file: str, missing_ok: bool = True) -> None:
 
     base = Path(file)
     with MissingOk(missing_ok):
@@ -50,20 +49,20 @@ def remove_lmdbm(file, missing_ok=True):
         base.rmdir()
 
 
-class Lmdb(MutableMapping):
+class Lmdb(MutableMapping, Generic[KT, VT]):
 
     autogrow_error = "Failed to grow LMDB ({}). Is there enough disk space available?"
     autogrow_msg = "Grew database (%s) map size to %s"
 
-    def __init__(self, env, autogrow):
-        # type: (lmdb.Environment, bool) -> None
+    def __init__(self, env: lmdb.Environment, autogrow: bool) -> None:
 
         self.env = env
         self.autogrow = autogrow
 
     @classmethod
-    def open(cls, file, flag="r", mode=0o755, map_size=2 ** 20, autogrow=True):
-        # type: (str, str, int, int, bool) -> Lmdb
+    def open(
+        cls, file: str, flag: str = "r", mode: int = 0o755, map_size: int = 2 ** 20, autogrow: bool = True
+    ) -> "Lmdb":
 
         """
         Opens the database `file`.
@@ -89,49 +88,42 @@ class Lmdb(MutableMapping):
         return cls(env, autogrow)
 
     @property
-    def map_size(self):
-        # type: () -> int
+    def map_size(self) -> int:
 
         return self.env.info()["map_size"]
 
     @map_size.setter
-    def map_size(self, value):
-        # type: (int, ) -> None
+    def map_size(self, value: int) -> None:
 
         self.env.set_mapsize(value)
 
-    def _pre_key(self, key):
-        # type: (object, ) -> bytes
+    def _pre_key(self, key: KT) -> bytes:
 
         if isinstance(key, bytes):
             return key
         elif isinstance(key, str):
             return key.encode("Latin-1")
 
-        raise TypeError
+        raise TypeError(key)
 
-    def _post_key(self, key):
-        # type: (bytes, ) -> KT
+    def _post_key(self, key: bytes) -> KT:
 
         return key
 
-    def _pre_value(self, value):
-        # type: (VT, ) -> bytes
+    def _pre_value(self, value: VT) -> bytes:
 
         if isinstance(value, bytes):
             return value
         elif isinstance(value, str):
             return value.encode("Latin-1")
 
-        raise TypeError
+        raise TypeError(value)
 
-    def _post_value(self, value):
-        # type: (bytes, ) -> VT
+    def _post_value(self, value: bytes) -> VT:
 
         return value
 
-    def __getitem__(self, key):
-        # type: (KT, ) -> VT
+    def __getitem__(self, key: KT) -> VT:
 
         with self.env.begin() as txn:
             value = txn.get(self._pre_key(key))
@@ -139,8 +131,7 @@ class Lmdb(MutableMapping):
             raise KeyError(key)
         return self._post_value(value)
 
-    def __setitem__(self, key, value):
-        # type: (KT, VT) -> None
+    def __setitem__(self, key: KT, value: VT) -> None:
 
         k = self._pre_key(key)
         v = self._pre_value(value)
@@ -158,53 +149,45 @@ class Lmdb(MutableMapping):
 
         exit(self.autogrow_error.format(self.env.path()))
 
-    def __delitem__(self, key):
-        # type: (KT, ) -> None
+    def __delitem__(self, key: KT) -> None:
 
         with self.env.begin(write=True) as txn:
             txn.delete(self._pre_key(key))
 
-    def keys(self):
-        # type: () -> Iterator[KT]
+    def keys(self) -> Iterator[KT]:
 
         with self.env.begin() as txn:
             for key in txn.cursor().iternext(keys=True, values=False):
                 yield self._post_key(key)
 
-    def items(self):
-        # type: () -> Iterator[Tuple[KT, VT]]
+    def items(self) -> Iterator[Tuple[KT, VT]]:
 
         with self.env.begin() as txn:
             for key, value in txn.cursor().iternext(keys=True, values=True):
                 yield (self._post_key(key), self._post_value(value))
 
-    def values(self):
-        # type: () -> Iterator[VT]
+    def values(self) -> Iterator[VT]:
 
         with self.env.begin() as txn:
             for value in txn.cursor().iternext(keys=False, values=True):
                 yield self._post_value(value)
 
-    def __contains__(self, key):
-        # type: (object, ) -> bool
+    def __contains__(self, key: KT) -> bool:
 
         with self.env.begin() as txn:
             value = txn.get(self._pre_key(key))
         return value is not None
 
-    def __iter__(self):
-        # type: () -> Iterator[KT]
+    def __iter__(self) -> Iterator[KT]:
 
         return self.keys()
 
-    def __len__(self):
-        # type: () -> int
+    def __len__(self) -> int:
 
         with self.env.begin() as txn:
             return txn.stat()["entries"]
 
-    def pop(self, key, default=object()):
-        # type: (KT, Union[VT, T]) -> Union[VT, T]
+    def pop(self, key: KT, default: Union[VT, T] = _DEFAULT) -> Union[VT, T]:
 
         with self.env.begin(write=True) as txn:
             value = txn.pop(self._pre_key(key))
@@ -212,8 +195,7 @@ class Lmdb(MutableMapping):
             return default
         return self._post_value(value)
 
-    def update(self, __other=(), **kwds):  # python3.8 only: update(self, other=(), /, **kwds)
-        # type: (Any, **VT) -> None
+    def update(self, __other: Any = (), **kwds: VT) -> None:  # python3.8 only: update(self, other=(), /, **kwds)
 
         # fixme: `kwds`
 
@@ -263,13 +245,11 @@ class Lmdb(MutableMapping):
 
         exit(self.autogrow_error.format(self.env.path()))
 
-    def sync(self):
-        # type: () -> None
+    def sync(self) -> None:
 
         self.env.sync()
 
-    def close(self):
-        # type: () -> None
+    def close(self) -> None:
 
         self.env.close()
 
@@ -281,18 +261,16 @@ class Lmdb(MutableMapping):
 
 
 class LmdbGzip(Lmdb):
-    def __init__(self, env, compresslevel=9):
-        Lmdb.__init__(self, env)
+    def __init__(self, env, autogrow: bool, compresslevel: int = 9):
+        Lmdb.__init__(self, env, autogrow)
         self.compresslevel = compresslevel
 
-    def _pre_value(self, value):
-        # type: (VT, ) -> bytes
+    def _pre_value(self, value: VT) -> bytes:
 
         value = Lmdb._pre_value(self, value)
         return compress(value, self.compresslevel)
 
-    def _post_value(self, value):
-        # type: (bytes, ) -> VT
+    def _post_value(self, value: bytes) -> VT:
 
         return decompress(value)
 

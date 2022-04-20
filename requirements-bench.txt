@@ -6,3 +6,4 @@ semidbm==0.5.1
 sqlitedict==1.7.0
 unqlite==0.9.2
 vedis==0.7.1
+wiredtiger-dbm==0.0.1

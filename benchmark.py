@@ -23,6 +23,8 @@ from pytablewriter import MarkdownTableWriter
 from sqlitedict import SqliteDict
 from unqlite import UnQLite
 from vedis import Vedis
+from wtdbm import WiredTigerDBM
+from wtdbm.wtdbm import remove_wtdbm
 
 from lmdbm import Lmdb, __version__
 from lmdbm.lmdbm import remove_lmdbm
@@ -31,6 +33,14 @@ ResultsDict = Dict[int, Dict[str, Dict[str, float]]]
 
 
 class JsonLmdb(Lmdb):
+    def _pre_value(self, value):
+        return json.dumps(value).encode("utf-8")
+
+    def _post_value(self, value):
+        return json.loads(value.decode("utf-8"))
+
+
+class JsonWtdbm(WiredTigerDBM):
     def _pre_value(self, value):
         return json.dumps(value).encode("utf-8")
 
@@ -85,9 +95,13 @@ def run_bench(N, db_tpl) -> Dict[str, Dict[str, float]]:
     VEDIS_BATCH_FILE = db_tpl.format("vedis-batch")
     UNQLITE_FILE = db_tpl.format("unqlite")
     UNQLITE_BATCH_FILE = db_tpl.format("unqlite-batch")
+    WTDBM_FILE = db_tpl.format("wtdbm")
+    WTDBM_BATCH_FILE = db_tpl.format("wtdbm-batch")
 
     remove_lmdbm(LMDBM_FILE)
     remove_lmdbm(LMDBM_BATCH_FILE)
+    remove_wtdbm(WTDBM_FILE)
+    remove_wtdbm(WTDBM_BATCH_FILE)
     with suppress(FileNotFoundError):
         os.unlink(PYSOS_FILE)
     with suppress(FileNotFoundError):
@@ -147,6 +161,20 @@ def run_bench(N, db_tpl) -> Dict[str, Dict[str, float]]:
                 db.commit()
     ret["sqlitedict-batch"]["write"] = t.get()
     print("sqlitedict-batch write", N, t.get())
+
+    with MeasureTime() as t:
+        with JsonWtdbm.open(WTDBM_FILE, "c") as db:
+            for k, v in data(N):
+                db[k] = v
+    ret["wiredtiger-dbm"]["write"] = t.get()
+    print("wiredtiger-dbm write", N, t.get())
+
+    with MeasureTime() as t:
+        with JsonWtdbm.open(WTDBM_BATCH_FILE, "c") as db:
+            for pairs in batch(data(N), batchsize):
+                db.update(pairs)
+    ret["wiredtiger-dbm-batch"]["write"] = t.get()
+    print("wiredtiger-dbm-batch write", N, t.get())
 
     with MeasureTime() as t:
         with dbm.dumb.open(DBM_DUMB_FILE, "c") as db:
@@ -231,6 +259,13 @@ def run_bench(N, db_tpl) -> Dict[str, Dict[str, float]]:
                 db[k]
     ret["sqlitedict"]["read"] = t.get()
     print("sqlitedict read", N, t.get())
+
+    with MeasureTime() as t:
+        with JsonWtdbm.open(WTDBM_FILE, "r") as db:
+            for k in randkeys(N, N):
+                db[k]
+    ret["wiredtiger-dbm"]["read"] = t.get()
+    print("wiredtiger-dbm read", N, t.get())
 
     with MeasureTime() as t:
         with dbm.dumb.open(DBM_DUMB_FILE, "r") as db:
@@ -348,7 +383,7 @@ if __name__ == "__main__":
         nargs="+",
         type=int,
         metavar="N",
-        default=[10, 100, 10 ** 3, 10 ** 4, 10 ** 5, 10 ** 6],
+        default=[10, 100, 10**3, 10**4, 10**5, 10**6],
         help="Number of records to read/write",
     )
     parser.add_argument("--bestof", type=int, metavar="N", default=3, help="Run N benchmarks")

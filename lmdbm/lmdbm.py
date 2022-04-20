@@ -22,7 +22,7 @@ class error(Exception):
     pass
 
 
-class MissingOk(object):
+class MissingOk:
 
     # for python < 3.8 compatibility
 
@@ -61,7 +61,7 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
 
     @classmethod
     def open(
-        cls, file: str, flag: str = "r", mode: int = 0o755, map_size: int = 2 ** 20, autogrow: bool = True
+        cls, file: str, flag: str = "r", mode: int = 0o755, map_size: int = 2**20, autogrow: bool = True
     ) -> "Lmdb":
 
         """
@@ -207,8 +207,8 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
         # save generated lists in case the insert fails and needs to be retried
         # for performance reasons, but mostly because `__other` could be an iterable
         # which would already be exhausted on the second try
-        pairs_other = None  # type: Optional[List[Tuple[bytes, bytes]]]
-        pairs_kwds = None  # type: Optional[List[Tuple[bytes, bytes]]]
+        pairs_other: Optional[List[Tuple[bytes, bytes]]] = None
+        pairs_kwds: Optional[List[Tuple[bytes, bytes]]] = None
 
         for i in range(12):
             try:

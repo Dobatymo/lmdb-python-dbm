@@ -1,308 +1,349 @@
+import pathlib
+import shutil
+import pickle
 import dbm.dumb
-
-try:
-    import dbm.gnu
-
-    gdbm = True
-except ModuleNotFoundError:
-    gdbm = False
-
 import json
 import os
 import os.path
+from abc import ABC, abstractmethod
 from collections import defaultdict
-from contextlib import redirect_stdout, suppress
+from contextlib import closing, suppress
 from random import randrange
-from typing import Callable, DefaultDict, Dict, Iterable, List, Sequence, TextIO
+from typing import Callable, DefaultDict, Dict, Iterable, List, Sequence, TextIO, Any
 
 import pysos
+import rocksdict
 import semidbm
+import sqlitedict
+import unqlite
+import vedis
 from genutility.iter import batch
 from genutility.time import MeasureTime
 from pytablewriter import MarkdownTableWriter
-from sqlitedict import SqliteDict
-from unqlite import UnQLite
-from vedis import Vedis
-from wtdbm import WiredTigerDBM
-from wtdbm.wtdbm import remove_wtdbm
 
-from lmdbm import Lmdb, __version__
-from lmdbm.lmdbm import remove_lmdbm
+import lmdbm
+import lmdbm.lmdbm
 
 ResultsDict = Dict[int, Dict[str, Dict[str, float]]]
 
-
-class JsonLmdb(Lmdb):
-    def _pre_value(self, value):
-        return json.dumps(value).encode("utf-8")
-
-    def _post_value(self, value):
-        return json.loads(value.decode("utf-8"))
+# Do not continue benchmark if the current
+# step requires more seconds than MAX_TIME
+MAX_TIME = 10
+BATCH_SIZE = 10000
 
 
-class JsonWtdbm(WiredTigerDBM):
-    def _pre_value(self, value):
-        return json.dumps(value).encode("utf-8")
+class BaseBenchmark(ABC):
+    def __init__(self, db_tpl, db_type):
+        self.available = True
+        self.batch_available = True
+        self.path = db_tpl.format(db_type)
+        self.name = db_type
+        self.write = -1
+        self.batch = -1
+        self.read = -1
+        self.combined = -1
 
-    def _post_value(self, value):
-        return json.loads(value.decode("utf-8"))
+    @abstractmethod
+    def open(self) -> None:
+        # Open the database
+        pass
+
+    def commit(self) -> None:
+        # Commit the changes, if it is not done automatically
+        pass
+
+    def purge(self) -> None:
+        # Remove the database file(s)
+        with suppress(FileNotFoundError):
+            os.unlink(self.path)
+
+    def encode(self, value: Any) -> Any:
+        # Convert Python objects to database-capable ones
+        return value
+
+    def decode(self, value: Any) -> Any:
+        # Convert database values to Python objects
+        return value
+
+    def measure_writes(self, N: int) -> None:
+        with MeasureTime() as t, self.open() as db:
+            for key, value in self.generate_data(N):
+                if t.get() > MAX_TIME:
+                    break
+                db[key] = self.encode(value)
+                self.commit()
+        if t.get() < MAX_TIME:
+            self.write = t.get()
+        self.print_time("write", N, t)
+
+    def measure_batch(self, N: int) -> None:
+        with MeasureTime() as t, self.open() as db:
+            for pairs in batch(self.generate_data(N), BATCH_SIZE):
+                if t.get() > MAX_TIME:
+                    break
+                db.update({key: self.encode(value) for key, value in pairs})
+                self.commit()
+        if t.get() < MAX_TIME:
+            self.batch = t.get()
+        self.print_time("batch write", N, t)
+
+    def measure_reads(self, N: int) -> None:
+        with MeasureTime() as t, self.open() as db:
+            for key in self.random_keys(N, N):
+                if t.get() > MAX_TIME:
+                    break
+                self.decode(db[key])
+        if t.get() < MAX_TIME:
+            self.read = t.get()
+        self.print_time("read", N, t)
+
+    def measure_combined(self, read=1, write=10, repeat=100) -> None:
+        with MeasureTime() as t, self.open() as db:
+            for _ in range(repeat):
+                if t.get() > MAX_TIME:
+                    break
+                for key, value in self.generate_data(read):
+                    db[key] = self.encode(value)
+                    self.commit()
+                for key in self.random_keys(10, write):
+                    self.decode(db[key])
+        if t.get() < MAX_TIME:
+            self.combined = t.get()
+        self.print_time("combined", (read + write) * repeat, t)
+
+    def database_is_built(self):
+        return self.batch >= 0 or self.write >= 0
+
+    def print_time(self, measure_type, numbers, t):
+        print(f"{self.name:<20s} {measure_type:<15s} {str(numbers):<10s} {t.get():10.5f}")
+
+    @staticmethod
+    def generate_data(size):
+        for i in range(size):
+            yield "key_" + str(i), {"some": "object_" + str(i)}
+
+    @staticmethod
+    def random_keys(num, size):
+        for _ in range(num):
+            yield "key_" + str(randrange(0, size))  # nosec
 
 
-def data(size):
-    for i in range(size):
-        yield "key_" + str(i), {"some": "object_" + str(i)}
+class JsonEncodedBenchmark(BaseBenchmark):
+    def encode(self, value):
+        return json.dumps(value)
+
+    def decode(self, value):
+        return json.loads(value)
 
 
-def randkeys(num, size):
-    for i in range(num):
-        yield "key_" + str(randrange(0, size))  # nosec
+class DummyPickleBenchmark(BaseBenchmark):
+    class MyDict(dict):
+        def close(self):
+            pass
+
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "dummypickle")
+        self.native_dict = None
+
+    def open(self):
+        if pathlib.Path(self.path).exists():
+            with open(self.path, "rb") as f:
+                self.native_dict = self.MyDict(pickle.load(f))
+        else:
+            self.native_dict = self.MyDict()
+        return closing(self.native_dict)
+
+    def commit(self):
+        tmp_file = self.path + ".tmp"
+        with open(tmp_file, "wb") as f:
+            pickle.dump(self.native_dict, f)
+        shutil.move(tmp_file, self.path)
 
 
-def allkeys(num):
-    for i in range(num):
-        yield "key_" + str(i)
+class DummyJsonBenchmark(BaseBenchmark):
+    class MyDict(dict):
+        def close(self):
+            pass
+
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "dummyjson")
+        self.native_dict = None
+
+    def open(self):
+        if pathlib.Path(self.path).exists():
+            with open(self.path, "r") as f:
+                self.native_dict = self.MyDict(json.load(f))
+        else:
+            self.native_dict = self.MyDict()
+        return closing(self.native_dict)
+
+    def commit(self):
+        tmp_file = self.path + ".tmp"
+        with open(tmp_file, "w") as f:
+            json.dump(self.native_dict, f, ensure_ascii=False, check_circular=False, sort_keys=False)
+        shutil.move(tmp_file, self.path)
 
 
-def remove_dbm(path):
-    with suppress(FileNotFoundError):
-        os.unlink(path + ".dat")
-    with suppress(FileNotFoundError):
-        os.unlink(path + ".bak")
-    with suppress(FileNotFoundError):
-        os.unlink(path + ".dir")
+class DumbDbmBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "dbm.dumb")
+
+    def open(self):
+        return dbm.dumb.open(self.path, "c")
+
+    def purge(self):
+        with suppress(FileNotFoundError):
+            os.unlink(self.path + ".dat")
+        with suppress(FileNotFoundError):
+            os.unlink(self.path + ".bak")
+        with suppress(FileNotFoundError):
+            os.unlink(self.path + ".dir")
 
 
-def remove_semidbm(path):
-    with suppress(FileNotFoundError):
-        os.unlink(path + "/data")
-    with suppress(FileNotFoundError):
-        os.rmdir(path)
+class SemiDbmBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "semidbm")
+        self.batch_available = False
+
+    def open(self):
+        return closing(semidbm.open(self.path, "c"))
+
+    def purge(self):
+        with suppress(FileNotFoundError):
+            os.unlink(self.path + "/data")
+        with suppress(FileNotFoundError):
+            os.rmdir(self.path)
+
+
+class LdbmBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "lmdbm")
+
+    def open(self):
+        return lmdbm.Lmdb.open(self.path, "c")
+
+    def purge(self):
+        lmdbm.lmdbm.remove_lmdbm(self.path)
+
+
+class PysosBenchmark(BaseBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "pysos")
+        self.batch_available = False
+
+    def open(self):
+        return closing(pysos.Dict(self.path))
+
+
+class SqliteAutocommitBenchmark(BaseBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "sqlite-autocommit")
+
+    def open(self):
+        return sqlitedict.SqliteDict(self.path, autocommit=True)
+
+
+class SqliteWalBenchmark(BaseBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "sqlite-wal")
+
+    def open(self):
+        return sqlitedict.SqliteDict(self.path, autocommit=True, journal_mode="WAL")
+
+
+class SqliteBatchBenchmark(BaseBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "sqlite-batch")
+        self.db = None
+
+    def open(self):
+        self.db = sqlitedict.SqliteDict(self.path, autocommit=False)
+        return self.db
+
+    def commit(self):
+        self.db.commit()
+
+
+class GnuDbmBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "dbm.gnu")
+        try:
+            import dbm.gnu
+
+            self.gnu_dbm = dbm.gnu
+        except:
+            self.available = False
+
+    def open(self):
+        return self.gnu_dbm.open(self.path, "c")
+
+
+class VedisBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "vedis")
+
+    def open(self):
+        return vedis.Vedis(self.path)
+
+
+class UnqliteBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "unqlite")
+
+    def open(self):
+        return unqlite.UnQLite(self.path)
+
+
+class RocksdictBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "rocksdict")
+        self.batch_available = False
+
+    def open(self):
+        return closing(rocksdict.Rdict(self.path))
+
+    def purge(self):
+        rocksdict.Rdict.destroy(self.path)
+
+
+BENCHMARK_CLASSES = [
+    LdbmBenchmark,
+    VedisBenchmark,
+    UnqliteBenchmark,
+    RocksdictBenchmark,
+    GnuDbmBenchmark,
+    SemiDbmBenchmark,
+    PysosBenchmark,
+    DumbDbmBenchmark,
+    SqliteWalBenchmark,
+    SqliteAutocommitBenchmark,
+    SqliteBatchBenchmark,
+    DummyPickleBenchmark,
+    DummyJsonBenchmark,
+]
 
 
 def run_bench(N, db_tpl) -> Dict[str, Dict[str, float]]:
+    benchmarks = [C(db_tpl) for C in BENCHMARK_CLASSES]
 
-    batchsize = 1000
-
-    LMDBM_FILE = db_tpl.format("lmdbm")
-    LMDBM_BATCH_FILE = db_tpl.format("lmdbm-batch")
-    PYSOS_FILE = db_tpl.format("pysos")
-    SQLITEDICT_FILE = db_tpl.format("sqlitedict")
-    SQLITEDICT_BATCH_FILE = db_tpl.format("sqlitedict-batch")
-    DBM_DUMB_FILE = db_tpl.format("dbm.dumb")
-    DBM_GNU_FILE = db_tpl.format("dbm.gnu")
-    SEMIDBM_FILE = db_tpl.format("semidbm")
-    VEDIS_FILE = db_tpl.format("vedis")
-    VEDIS_BATCH_FILE = db_tpl.format("vedis-batch")
-    UNQLITE_FILE = db_tpl.format("unqlite")
-    UNQLITE_BATCH_FILE = db_tpl.format("unqlite-batch")
-    WTDBM_FILE = db_tpl.format("wtdbm")
-    WTDBM_BATCH_FILE = db_tpl.format("wtdbm-batch")
-
-    remove_lmdbm(LMDBM_FILE)
-    remove_lmdbm(LMDBM_BATCH_FILE)
-    remove_wtdbm(WTDBM_FILE)
-    remove_wtdbm(WTDBM_BATCH_FILE)
-    with suppress(FileNotFoundError):
-        os.unlink(PYSOS_FILE)
-    with suppress(FileNotFoundError):
-        os.unlink(SQLITEDICT_FILE)
-    with suppress(FileNotFoundError):
-        os.unlink(SQLITEDICT_BATCH_FILE)
-    remove_dbm(DBM_DUMB_FILE)
-    remove_semidbm(SEMIDBM_FILE)
-    with suppress(FileNotFoundError):
-        os.unlink(VEDIS_FILE)
-    with suppress(FileNotFoundError):
-        os.unlink(VEDIS_BATCH_FILE)
-    with suppress(FileNotFoundError):
-        os.unlink(UNQLITE_FILE)
-    with suppress(FileNotFoundError):
-        os.unlink(UNQLITE_BATCH_FILE)
+    for benchmark in benchmarks:
+        if not benchmark.available:
+            continue
+        benchmark.purge()
+        benchmark.measure_writes(N)
+        if benchmark.batch_available:
+            benchmark.purge()
+            benchmark.measure_batch(N)
+        if benchmark.database_is_built():
+            benchmark.measure_reads(N)
+            benchmark.measure_combined(read=1, write=10, repeat=100)
 
     ret: DefaultDict[str, Dict[str, float]] = defaultdict(dict)
-
-    # writes
-
-    with MeasureTime() as t:
-        with JsonLmdb.open(LMDBM_FILE, "c") as db:
-            for k, v in data(N):
-                db[k] = v
-    ret["lmdbm"]["write"] = t.get()
-    print("lmdbm write", N, t.get())
-
-    with MeasureTime() as t:
-        with JsonLmdb.open(LMDBM_BATCH_FILE, "c") as db:
-            for pairs in batch(data(N), batchsize):
-                db.update(pairs)
-    ret["lmdbm-batch"]["write"] = t.get()
-    print("lmdbm-batch write", N, t.get())
-
-    with open(os.devnull, "w") as devnull:  # mute annoying "free lines" output
-        with redirect_stdout(devnull):
-            with MeasureTime() as t:
-                db = pysos.Dict(PYSOS_FILE)
-                for k, v in data(N):
-                    db[k] = v
-                db.close()
-    ret["pysos"]["write"] = t.get()
-    print("pysos write", N, t.get())
-
-    with MeasureTime() as t:
-        with SqliteDict(SQLITEDICT_FILE, autocommit=True) as db:
-            for k, v in data(N):
-                db[k] = v
-    ret["sqlitedict"]["write"] = t.get()
-    print("sqlitedict write", N, t.get())
-
-    with MeasureTime() as t:
-        with SqliteDict(SQLITEDICT_BATCH_FILE, autocommit=False) as db:
-            for pairs in batch(data(N), batchsize):
-                db.update(pairs)
-                db.commit()
-    ret["sqlitedict-batch"]["write"] = t.get()
-    print("sqlitedict-batch write", N, t.get())
-
-    with MeasureTime() as t:
-        with JsonWtdbm.open(WTDBM_FILE, "c") as db:
-            for k, v in data(N):
-                db[k] = v
-    ret["wiredtiger-dbm"]["write"] = t.get()
-    print("wiredtiger-dbm write", N, t.get())
-
-    with MeasureTime() as t:
-        with JsonWtdbm.open(WTDBM_BATCH_FILE, "c") as db:
-            for pairs in batch(data(N), batchsize):
-                db.update(pairs)
-    ret["wiredtiger-dbm-batch"]["write"] = t.get()
-    print("wiredtiger-dbm-batch write", N, t.get())
-
-    with MeasureTime() as t:
-        with dbm.dumb.open(DBM_DUMB_FILE, "c") as db:
-            for k, v in data(N):
-                db[k] = json.dumps(v)
-    ret["dbm.dumb"]["write"] = t.get()
-    print("dbm.dumb write", N, t.get())
-
-    if gdbm:
-        with MeasureTime() as t:
-            with dbm.gnu.open(DBM_GNU_FILE, "c") as db:
-                for k, v in data(N):
-                    db[k] = json.dumps(v)
-        ret["dbm.gnu"]["write"] = t.get()
-        print("dbm.gnu write", N, t.get())
-
-    with MeasureTime() as t:
-        db = semidbm.open(SEMIDBM_FILE, "c")
-        for k, v in data(N):
-            db[k] = json.dumps(v)
-        db.close()
-    ret["semidbm"]["write"] = t.get()
-    print("semidbm write", N, t.get())
-
-    with MeasureTime() as t:
-        with Vedis(VEDIS_FILE) as db:
-            for k, v in data(N):
-                db[k] = json.dumps(v)
-    ret["vedis"]["write"] = t.get()
-    print("vedis write", N, t.get())
-
-    with MeasureTime() as t:
-        with Vedis(VEDIS_BATCH_FILE) as db:
-            for pairs in batch(data(N), batchsize):
-                db.update({k: json.dumps(v) for k, v in pairs})
-    ret["vedis-batch"]["write"] = t.get()
-    print("vedis-batch write", N, t.get())
-
-    with MeasureTime() as t:
-        with UnQLite(UNQLITE_FILE) as db:
-            for k, v in data(N):
-                db[k] = json.dumps(v)
-    ret["unqlite"]["write"] = t.get()
-    print("unqlite write", N, t.get())
-
-    with MeasureTime() as t:
-        with UnQLite(UNQLITE_BATCH_FILE) as db:
-            for pairs in batch(data(N), batchsize):
-                db.update({k: json.dumps(v) for k, v in pairs})
-    ret["unqlite-batch"]["write"] = t.get()
-    print("unqlite-batch write", N, t.get())
-
-    # reads
-
-    with MeasureTime() as t:
-        with JsonLmdb.open(LMDBM_FILE, "r") as db:
-            for k in allkeys(N):
-                db[k]
-    # ret["lmdbm"]["read"] = t.get()
-    print("lmdbm cont read", N, t.get())
-
-    with MeasureTime() as t:
-        with JsonLmdb.open(LMDBM_FILE, "r") as db:
-            for k in randkeys(N, N):
-                db[k]
-    ret["lmdbm"]["read"] = t.get()
-    print("lmdbm rand read", N, t.get())
-
-    with open(os.devnull, "w") as devnull:  # mute annoying "free lines" output
-        with redirect_stdout(devnull):
-            with MeasureTime() as t:
-                db = pysos.Dict(PYSOS_FILE)
-                for k in randkeys(N, N):
-                    db[k]
-                db.close()
-    ret["pysos"]["read"] = t.get()
-    print("pysos read", N, t.get())
-
-    with MeasureTime() as t:
-        with SqliteDict(SQLITEDICT_FILE) as db:
-            for k in randkeys(N, N):
-                db[k]
-    ret["sqlitedict"]["read"] = t.get()
-    print("sqlitedict read", N, t.get())
-
-    with MeasureTime() as t:
-        with JsonWtdbm.open(WTDBM_FILE, "r") as db:
-            for k in randkeys(N, N):
-                db[k]
-    ret["wiredtiger-dbm"]["read"] = t.get()
-    print("wiredtiger-dbm read", N, t.get())
-
-    with MeasureTime() as t:
-        with dbm.dumb.open(DBM_DUMB_FILE, "r") as db:
-            for k in randkeys(N, N):
-                json.loads(db[k])
-    ret["dbm.dumb"]["read"] = t.get()
-    print("dbm.dumb read", N, t.get())
-
-    if gdbm:
-        with MeasureTime() as t:
-            with dbm.gnu.open(DBM_GNU_FILE, "r") as db:
-                for k in randkeys(N, N):
-                    json.loads(db[k])
-        ret["dbm.gnu"]["read"] = t.get()
-        print("dbm.gnu read", N, t.get())
-
-    with MeasureTime() as t:
-        db = semidbm.open(SEMIDBM_FILE, "r")
-        for k in randkeys(N, N):
-            json.loads(db[k])
-        db.close()
-    ret["semidbm"]["read"] = t.get()
-    print("semidbm read", N, t.get())
-
-    with MeasureTime() as t:
-        with Vedis(VEDIS_FILE) as db:
-            for k in randkeys(N, N):
-                json.loads(db[k])
-    ret["vedis"]["read"] = t.get()
-    print("vedis read", N, t.get())
-
-    with MeasureTime() as t:
-        with UnQLite(UNQLITE_FILE) as db:
-            for k in randkeys(N, N):
-                json.loads(db[k])
-    ret["unqlite"]["read"] = t.get()
-    print("unqlite read", N, t.get())
+    for benchmark in benchmarks:
+        ret[benchmark.name]["read"] = benchmark.read
+        ret[benchmark.name]["write"] = benchmark.write
+        ret[benchmark.name]["batch"] = benchmark.batch
+        ret[benchmark.name]["combined"] = benchmark.combined
 
     return ret
 
@@ -316,6 +357,7 @@ def bench(base: str, nums: Iterable[int]) -> ResultsDict:
     db_tpl = os.path.join(base, "test_{}.db")
 
     for num in nums:
+        print("")
         ret[num] = run_bench(num, db_tpl)
 
     return ret
@@ -332,8 +374,8 @@ def write_markdown_table(stream: TextIO, results: ResultsDict, method: str):
         row = [str(k)]
         for h in headers:
             value = v[h].get(method)
-            if value is None:
-                new_value = ""
+            if value is None or value < 0:
+                new_value = "-"
             else:
                 new_value = format(value, ".04f")
             row.append(new_value)
@@ -377,7 +419,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--outpath", default="bench-dbs", help="Directory to store temporary benchmarking databases")
-    parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument("--version", action="version", version=lmdbm.__version__)
     parser.add_argument(
         "--sizes",
         nargs="+",
@@ -390,13 +432,19 @@ if __name__ == "__main__":
     parser.add_argument("--outfile", default="benchmarks.md", help="Benchmark results")
     args = parser.parse_args()
 
-    with open(args.outfile, "wt", encoding="utf-8") as fw:
-        results: List[ResultsDict] = []
+    results: List[ResultsDict] = []
 
-        for _ in progress(range(args.bestof)):
-            results.append(bench(args.outpath, args.sizes))
+    for _ in progress(range(args.bestof)):
+        print("")
+        results.append(bench(args.outpath, args.sizes))
 
+    if args.bestof == 1:
+        best_results = results[0]
+    else:
         best_results = merge_results(results)
 
+    with open(args.outfile, "wt", encoding="utf-8") as fw:
         write_markdown_table(fw, best_results, "write")
+        write_markdown_table(fw, best_results, "batch")
         write_markdown_table(fw, best_results, "read")
+        write_markdown_table(fw, best_results, "combined")

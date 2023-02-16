@@ -23,11 +23,9 @@ class error(Exception):
 
 
 class MissingOk:
-
     # for python < 3.8 compatibility
 
     def __init__(self, ok: bool) -> None:
-
         self.ok = ok
 
     def __enter__(self):
@@ -39,7 +37,6 @@ class MissingOk:
 
 
 def remove_lmdbm(file: str, missing_ok: bool = True) -> None:
-
     base = Path(file)
     with MissingOk(missing_ok):
         (base / "data.mdb").unlink()
@@ -50,12 +47,10 @@ def remove_lmdbm(file: str, missing_ok: bool = True) -> None:
 
 
 class Lmdb(MutableMapping, Generic[KT, VT]):
-
     autogrow_error = "Failed to grow LMDB ({}). Is there enough disk space available?"
     autogrow_msg = "Grew database (%s) map size to %s"
 
     def __init__(self, env: lmdb.Environment, autogrow: bool) -> None:
-
         self.env = env
         self.autogrow = autogrow
 
@@ -63,7 +58,6 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
     def open(
         cls, file: str, flag: str = "r", mode: int = 0o755, map_size: int = 2**20, autogrow: bool = True
     ) -> "Lmdb":
-
         """
         Opens the database `file`.
         `flag`: r (read only, existing), w (read and write, existing),
@@ -89,16 +83,13 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
 
     @property
     def map_size(self) -> int:
-
         return self.env.info()["map_size"]
 
     @map_size.setter
     def map_size(self, value: int) -> None:
-
         self.env.set_mapsize(value)
 
     def _pre_key(self, key: KT) -> bytes:
-
         if isinstance(key, bytes):
             return key
         elif isinstance(key, str):
@@ -107,11 +98,9 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
         raise TypeError(key)
 
     def _post_key(self, key: bytes) -> KT:
-
         return key
 
     def _pre_value(self, value: VT) -> bytes:
-
         if isinstance(value, bytes):
             return value
         elif isinstance(value, str):
@@ -120,11 +109,9 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
         raise TypeError(value)
 
     def _post_value(self, value: bytes) -> VT:
-
         return value
 
     def __getitem__(self, key: KT) -> VT:
-
         with self.env.begin() as txn:
             value = txn.get(self._pre_key(key))
         if value is None:
@@ -132,7 +119,6 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
         return self._post_value(value)
 
     def __setitem__(self, key: KT, value: VT) -> None:
-
         k = self._pre_key(key)
         v = self._pre_value(value)
         for i in range(12):
@@ -150,45 +136,37 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
         exit(self.autogrow_error.format(self.env.path()))
 
     def __delitem__(self, key: KT) -> None:
-
         with self.env.begin(write=True) as txn:
             txn.delete(self._pre_key(key))
 
     def keys(self) -> Iterator[KT]:
-
         with self.env.begin() as txn:
             for key in txn.cursor().iternext(keys=True, values=False):
                 yield self._post_key(key)
 
     def items(self) -> Iterator[Tuple[KT, VT]]:
-
         with self.env.begin() as txn:
             for key, value in txn.cursor().iternext(keys=True, values=True):
                 yield (self._post_key(key), self._post_value(value))
 
     def values(self) -> Iterator[VT]:
-
         with self.env.begin() as txn:
             for value in txn.cursor().iternext(keys=False, values=True):
                 yield self._post_value(value)
 
     def __contains__(self, key: KT) -> bool:
-
         with self.env.begin() as txn:
             value = txn.get(self._pre_key(key))
         return value is not None
 
     def __iter__(self) -> Iterator[KT]:
-
         return self.keys()
 
     def __len__(self) -> int:
-
         with self.env.begin() as txn:
             return txn.stat()["entries"]
 
     def pop(self, key: KT, default: Union[VT, T] = _DEFAULT) -> Union[VT, T]:
-
         with self.env.begin(write=True) as txn:
             value = txn.pop(self._pre_key(key))
         if value is None:
@@ -196,7 +174,6 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
         return self._post_value(value)
 
     def update(self, __other: Any = (), **kwds: VT) -> None:  # python3.8 only: update(self, other=(), /, **kwds)
-
         # fixme: `kwds`
 
         # note: benchmarking showed that there is no real difference between using lists or iterables
@@ -246,11 +223,9 @@ class Lmdb(MutableMapping, Generic[KT, VT]):
         exit(self.autogrow_error.format(self.env.path()))
 
     def sync(self) -> None:
-
         self.env.sync()
 
     def close(self) -> None:
-
         self.env.close()
 
     def __enter__(self):
@@ -266,12 +241,10 @@ class LmdbGzip(Lmdb):
         self.compresslevel = compresslevel
 
     def _pre_value(self, value: VT) -> bytes:
-
         value = Lmdb._pre_value(self, value)
         return compress(value, self.compresslevel)
 
     def _post_value(self, value: bytes) -> VT:
-
         return decompress(value)
 
 

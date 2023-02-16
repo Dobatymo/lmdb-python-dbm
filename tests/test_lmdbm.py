@@ -8,7 +8,6 @@ from lmdbm.lmdbm import remove_lmdbm
 
 
 class LmdbmTests(MyTestCase):
-
     _name = "./test.db"
 
     _dict = {
@@ -30,7 +29,6 @@ class LmdbmTests(MyTestCase):
 
     def test_mem_grow(self):
         with Lmdb.open(self._name, "n", map_size=1024) as db:
-
             key = b"asd"
             value = b"asd" * 1000
 
@@ -42,7 +40,6 @@ class LmdbmTests(MyTestCase):
         self._delete_db()
 
     def test_mem_grow_batch(self):
-
         value = b"asd" * 1000
 
         def data():
@@ -50,7 +47,6 @@ class LmdbmTests(MyTestCase):
             yield "key_2", value
 
         with Lmdb.open(self._name, "n", map_size=1024) as db:
-
             db.update(data())
             assert db["key_1"] == value
             assert db["key_2"] == value
@@ -58,7 +54,6 @@ class LmdbmTests(MyTestCase):
         self._delete_db()
 
     def test_missing_read_only(self):
-
         with self.assertRaises(Error):
             with Lmdb.open(self._name, "r", map_size=1024) as db:
                 db["key"] = "value"
@@ -66,7 +61,6 @@ class LmdbmTests(MyTestCase):
         assert not Path(self._name).exists()
 
     def test_modify(self):
-
         self._init_db()
         with Lmdb.open(self._name, "c") as f:
             self._dict[b"g"] = f[b"g"] = b"indented"

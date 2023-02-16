@@ -1,15 +1,15 @@
-import pathlib
-import shutil
-import pickle
 import dbm.dumb
 import json
 import os
 import os.path
+import pathlib
+import pickle  # nosec
+import shutil
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import closing, suppress
 from random import randrange
-from typing import Callable, DefaultDict, Dict, Iterable, List, Sequence, TextIO, Any
+from typing import Any, Callable, DefaultDict, Dict, Iterable, List, Sequence, TextIO
 
 import pysos
 import rocksdict
@@ -148,7 +148,7 @@ class DummyPickleBenchmark(BaseBenchmark):
     def open(self):
         if pathlib.Path(self.path).exists():
             with open(self.path, "rb") as f:
-                self.native_dict = self.MyDict(pickle.load(f))
+                self.native_dict = self.MyDict(pickle.load(f))  # nosec
         else:
             self.native_dict = self.MyDict()
         return closing(self.native_dict)
@@ -171,7 +171,7 @@ class DummyJsonBenchmark(BaseBenchmark):
 
     def open(self):
         if pathlib.Path(self.path).exists():
-            with open(self.path, "r") as f:
+            with open(self.path) as f:
                 self.native_dict = self.MyDict(json.load(f))
         else:
             self.native_dict = self.MyDict()
@@ -271,7 +271,7 @@ class GnuDbmBenchmark(JsonEncodedBenchmark):
             import dbm.gnu
 
             self.gnu_dbm = dbm.gnu
-        except:
+        except ImportError:
             self.available = False
 
     def open(self):
@@ -349,7 +349,6 @@ def run_bench(N, db_tpl) -> Dict[str, Dict[str, float]]:
 
 
 def bench(base: str, nums: Iterable[int]) -> ResultsDict:
-
     with suppress(FileExistsError):
         os.mkdir(base)
 
@@ -364,7 +363,6 @@ def bench(base: str, nums: Iterable[int]) -> ResultsDict:
 
 
 def write_markdown_table(stream: TextIO, results: ResultsDict, method: str):
-
     for k, v in results.items():
         headers = list(v.keys())
         break
@@ -395,7 +393,6 @@ def _check_same_keys(dicts: Sequence[dict]):
 
 
 def merge_results(results: Sequence[ResultsDict], func: Callable = min) -> ResultsDict:
-
     out: ResultsDict = {}
 
     _check_same_keys(results)
@@ -412,7 +409,6 @@ def merge_results(results: Sequence[ResultsDict], func: Callable = min) -> Resul
 
 
 if __name__ == "__main__":
-
     from argparse import ArgumentParser
 
     from genutility.iter import progress
@@ -443,7 +439,7 @@ if __name__ == "__main__":
     else:
         best_results = merge_results(results)
 
-    with open(args.outfile, "wt", encoding="utf-8") as fw:
+    with open(args.outfile, "w", encoding="utf-8") as fw:
         write_markdown_table(fw, best_results, "write")
         write_markdown_table(fw, best_results, "batch")
         write_markdown_table(fw, best_results, "read")

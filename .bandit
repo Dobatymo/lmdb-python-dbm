@@ -1,3 +1,0 @@
-[bandit]
-# B101 : assert_used
-skips: B101

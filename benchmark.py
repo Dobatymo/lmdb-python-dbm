@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import closing, suppress
 from random import randrange
-from typing import Any, Callable, DefaultDict, Dict, Iterable, List, Sequence, TextIO
+from typing import Any, Callable, ContextManager, DefaultDict, Dict, Iterable, List, Sequence, TextIO
 
 import pysos
 import rocksdict
@@ -44,25 +44,30 @@ class BaseBenchmark(ABC):
         self.combined = -1
 
     @abstractmethod
-    def open(self) -> None:
-        # Open the database
+    def open(self) -> ContextManager:
+        """Open the database"""
+
         pass
 
-    def commit(self) -> None:
-        # Commit the changes, if it is not done automatically
+    def commit(self) -> None:  # noqa: B027
+        """Commit the changes, if it is not done automatically"""
+
         pass
 
     def purge(self) -> None:
-        # Remove the database file(s)
+        """Remove the database file(s)"""
+
         with suppress(FileNotFoundError):
             os.unlink(self.path)
 
     def encode(self, value: Any) -> Any:
-        # Convert Python objects to database-capable ones
+        """Convert Python objects to database-capable ones"""
+
         return value
 
     def decode(self, value: Any) -> Any:
-        # Convert database values to Python objects
+        """Convert database values to Python objects"""
+
         return value
 
     def measure_writes(self, N: int) -> None:
@@ -363,7 +368,7 @@ def bench(base: str, nums: Iterable[int]) -> ResultsDict:
 
 
 def write_markdown_table(stream: TextIO, results: ResultsDict, method: str):
-    for k, v in results.items():
+    for v in results.values():
         headers = list(v.keys())
         break
 
@@ -411,7 +416,8 @@ def merge_results(results: Sequence[ResultsDict], func: Callable = min) -> Resul
 if __name__ == "__main__":
     from argparse import ArgumentParser
 
-    from genutility.iter import progress
+    from genutility.rich import Progress
+    from rich.progress import Progress as RichProgress
 
     parser = ArgumentParser()
     parser.add_argument("--outpath", default="bench-dbs", help="Directory to store temporary benchmarking databases")
@@ -430,9 +436,10 @@ if __name__ == "__main__":
 
     results: List[ResultsDict] = []
 
-    for _ in progress(range(args.bestof)):
-        print("")
-        results.append(bench(args.outpath, args.sizes))
+    with RichProgress() as progress:
+        p = Progress(progress)
+        for _ in p.track(range(args.bestof)):
+            results.append(bench(args.outpath, args.sizes))
 
     if args.bestof == 1:
         best_results = results[0]

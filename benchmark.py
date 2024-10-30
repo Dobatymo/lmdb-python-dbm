@@ -278,6 +278,7 @@ class GnuDbmBenchmark(JsonEncodedBenchmark):
             self.gnu_dbm = dbm.gnu
         except ImportError:
             self.available = False
+        self.batch_available = False
 
     def open(self):
         return self.gnu_dbm.open(self.path, "c")

@@ -17,6 +17,7 @@ import semidbm
 import sqlitedict
 import unqlite
 import vedis
+import shelve
 from genutility.iter import batch
 from genutility.time import MeasureTime
 from pytablewriter import MarkdownTableWriter
@@ -284,6 +285,14 @@ class GnuDbmBenchmark(JsonEncodedBenchmark):
         return self.gnu_dbm.open(self.path, "c")
 
 
+class ShelveBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "shelve")
+
+    def open(self):
+        return shelve.open(self.path)
+
+
 class VedisBenchmark(JsonEncodedBenchmark):
     def __init__(self, db_tpl):
         super().__init__(db_tpl, "vedis")
@@ -318,6 +327,7 @@ BENCHMARK_CLASSES = [
     UnqliteBenchmark,
     RocksdictBenchmark,
     GnuDbmBenchmark,
+    ShelveBenchmark,
     SemiDbmBenchmark,
     PysosBenchmark,
     DumbDbmBenchmark,

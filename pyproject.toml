@@ -1,14 +1,14 @@
 [build-system]
 build-backend = "flit_core.buildapi"
 requires = [
-  "flit_core<4,>=3.2",
+  "flit-core<4,>=3.2",
 ]
 
 [project]
 name = "lmdbm"
 readme = "readme.md"
-authors = [{name = "Dobatymo", email = "Dobatymo@users.noreply.github.com"}]
-requires-python = ">= 3.7"
+authors = [ { name = "Dobatymo", email = "Dobatymo@users.noreply.github.com" } ]
+requires-python = ">=3.7"
 classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: ISC License (ISCL)",
@@ -20,6 +20,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Database",
 ]
 dynamic = [
@@ -30,8 +31,7 @@ dependencies = [
   "lmdb",
   "typing-extensions>=4",
 ]
-[project.optional-dependencies]
-bench = [
+optional-dependencies.bench = [
   "genutility[iter,rich,time]>=0.0.103",
   "pysos==1.2.9",
   "pytablewriter==0.63",
@@ -41,11 +41,10 @@ bench = [
   "unqlite==0.9.2",
   "vedis==0.7.1",
 ]
-test = [
+optional-dependencies.test = [
   "genutility[test]",
 ]
-[project.urls]
-Home = "https://github.com/Dobatymo/lmdb-python-dbm"
+urls.Home = "https://github.com/Dobatymo/lmdb-python-dbm"
 
 [tool.black]
 line-length = 120
@@ -58,4 +57,4 @@ profile = "black"
 line_length = 120
 
 [tool.bandit]
-skips = ["B101"]
+skips = [ "B101" ]

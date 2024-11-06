@@ -1,6 +1,10 @@
 name: Python package
 
-on: [push]
+on:
+  pull_request:
+  push:
+    branches:
+    - master
 
 jobs:
 
@@ -25,11 +29,13 @@ jobs:
     needs: lint
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-12, windows-2019]
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12']
+        os: [ubuntu-20.04, macos-13, windows-2019]
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
         exclude:
         - os: windows-2019
           python-version: '3.12'
+        - os: windows-2019
+          python-version: '3.13'
     runs-on: ${{ matrix.os }}
 
     steps:

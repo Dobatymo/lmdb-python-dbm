@@ -9,10 +9,10 @@ import sys
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import closing, suppress
+from importlib import import_module
 from random import randrange
 from typing import Any, Callable, ContextManager, DefaultDict, Dict, Iterable, List, Sequence, TextIO
 
-from importlib import import_module
 from genutility.iter import batch
 from genutility.time import MeasureTime
 from pytablewriter import MarkdownTableWriter
@@ -40,12 +40,12 @@ class BaseBenchmark(ABC):
         self.combined = -1
 
     def load_module(self, name):
-        """"Load module and ignore benchmark if module is unavailable"""
+        """ "Load module and ignore benchmark if module is unavailable"""
         if name is None or name in sys.modules:
             return True
 
         try:
-            globals()[name.split('.')[-1]] = import_module(name)
+            globals()[name.split(".")[-1]] = import_module(name)
             print(f"Loaded module {name}")
         except ImportError:
             return False
@@ -293,7 +293,7 @@ class ShelveBenchmark(JsonEncodedBenchmark):
         super().__init__(db_tpl, "shelve", "shelve")
 
     def open(self):
-        return shelve.open(self.path)
+        return shelve.open(self.path)  # nosec B301
 
 
 class VedisBenchmark(JsonEncodedBenchmark):

@@ -43,9 +43,10 @@ As of `lmdb==1.2.1` the docs say that calling `lmdb.Environment.set_mapsize` fro
 
 ## Benchmarks
 
-See `benchmark.py` and `requirements-bench.txt`. Other storage engines which could be tested: `wiredtiger`, `berkeleydb`.
+Install `lmdbm[bench]` and run `benchmark.py`. Other storage engines which could be tested: `wiredtiger`, `berkeleydb`.
+
 Storage engines not benchmarked:
-	- `tinydb` (because it doesn't have built-in str/bytes keys)
+- `tinydb` (because it doesn't have built-in str/bytes keys)
 
 ### continuous writes in seconds (best of 3)
 | items | lmdbm  |lmdbm-batch|pysos |sqlitedict|sqlitedict-batch|dbm.dumb|semidbm|vedis |vedis-batch|unqlite|unqlite-batch|

@@ -5,18 +5,14 @@ import os.path
 import pathlib
 import pickle  # nosec
 import shutil
+import sys
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import closing, suppress
 from random import randrange
 from typing import Any, Callable, ContextManager, DefaultDict, Dict, Iterable, List, Sequence, TextIO
 
-import pysos
-import rocksdict
-import semidbm
-import sqlitedict
-import unqlite
-import vedis
+from importlib import import_module
 from genutility.iter import batch
 from genutility.time import MeasureTime
 from pytablewriter import MarkdownTableWriter
@@ -33,8 +29,8 @@ BATCH_SIZE = 10000
 
 
 class BaseBenchmark(ABC):
-    def __init__(self, db_tpl, db_type):
-        self.available = True
+    def __init__(self, db_tpl, db_type, db_module):
+        self.available = self.load_module(db_module)
         self.batch_available = True
         self.path = db_tpl.format(db_type)
         self.name = db_type
@@ -42,6 +38,18 @@ class BaseBenchmark(ABC):
         self.batch = -1
         self.read = -1
         self.combined = -1
+
+    def load_module(self, name):
+        """"Load module and ignore benchmark if module is unavailable"""
+        if name is None or name in sys.modules:
+            return True
+
+        try:
+            globals()[name.split('.')[-1]] = import_module(name)
+            print(f"Loaded module {name}")
+        except ImportError:
+            return False
+        return True
 
     @abstractmethod
     def open(self) -> ContextManager:
@@ -147,8 +155,8 @@ class DummyPickleBenchmark(BaseBenchmark):
             pass
 
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "dummypickle")
         self.native_dict = None
+        super().__init__(db_tpl, "dummypickle", None)
 
     def open(self):
         if pathlib.Path(self.path).exists():
@@ -171,8 +179,8 @@ class DummyJsonBenchmark(BaseBenchmark):
             pass
 
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "dummyjson")
         self.native_dict = None
+        super().__init__(db_tpl, "dummyjson", None)
 
     def open(self):
         if pathlib.Path(self.path).exists():
@@ -191,7 +199,7 @@ class DummyJsonBenchmark(BaseBenchmark):
 
 class DumbDbmBenchmark(JsonEncodedBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "dbm.dumb")
+        super().__init__(db_tpl, "dbm.dumb", "dbm.dumb")
 
     def open(self):
         return dbm.dumb.open(self.path, "c")
@@ -207,7 +215,7 @@ class DumbDbmBenchmark(JsonEncodedBenchmark):
 
 class SemiDbmBenchmark(JsonEncodedBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "semidbm")
+        super().__init__(db_tpl, "semidbm", "semidbm")
         self.batch_available = False
 
     def open(self):
@@ -222,7 +230,7 @@ class SemiDbmBenchmark(JsonEncodedBenchmark):
 
 class LdbmBenchmark(JsonEncodedBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "lmdbm")
+        super().__init__(db_tpl, "lmdbm", "lmdbm")
 
     def open(self):
         return lmdbm.Lmdb.open(self.path, "c")
@@ -233,7 +241,7 @@ class LdbmBenchmark(JsonEncodedBenchmark):
 
 class PysosBenchmark(BaseBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "pysos")
+        super().__init__(db_tpl, "pysos", "pysos")
         self.batch_available = False
 
     def open(self):
@@ -242,7 +250,7 @@ class PysosBenchmark(BaseBenchmark):
 
 class SqliteAutocommitBenchmark(BaseBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "sqlite-autocommit")
+        super().__init__(db_tpl, "sqlite-autocommit", "sqlitedict")
 
     def open(self):
         return sqlitedict.SqliteDict(self.path, autocommit=True)
@@ -250,7 +258,7 @@ class SqliteAutocommitBenchmark(BaseBenchmark):
 
 class SqliteWalBenchmark(BaseBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "sqlite-wal")
+        super().__init__(db_tpl, "sqlite-wal", "sqlitedict")
 
     def open(self):
         return sqlitedict.SqliteDict(self.path, autocommit=True, journal_mode="WAL")
@@ -258,7 +266,7 @@ class SqliteWalBenchmark(BaseBenchmark):
 
 class SqliteBatchBenchmark(BaseBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "sqlite-batch")
+        super().__init__(db_tpl, "sqlite-batch", "sqlitedict")
         self.db = None
 
     def open(self):
@@ -271,21 +279,26 @@ class SqliteBatchBenchmark(BaseBenchmark):
 
 class GnuDbmBenchmark(JsonEncodedBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "dbm.gnu")
-        try:
-            import dbm.gnu
-
+        super().__init__(db_tpl, "dbm.gnu", "dbm.gnu")
+        if self.available:
             self.gnu_dbm = dbm.gnu
-        except ImportError:
-            self.available = False
+        self.batch_available = False
 
     def open(self):
         return self.gnu_dbm.open(self.path, "c")
 
 
+class ShelveBenchmark(JsonEncodedBenchmark):
+    def __init__(self, db_tpl):
+        super().__init__(db_tpl, "shelve", "shelve")
+
+    def open(self):
+        return shelve.open(self.path)
+
+
 class VedisBenchmark(JsonEncodedBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "vedis")
+        super().__init__(db_tpl, "vedis", "vedis")
 
     def open(self):
         return vedis.Vedis(self.path)
@@ -293,7 +306,7 @@ class VedisBenchmark(JsonEncodedBenchmark):
 
 class UnqliteBenchmark(JsonEncodedBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "unqlite")
+        super().__init__(db_tpl, "unqlite", "unqlite")
 
     def open(self):
         return unqlite.UnQLite(self.path)
@@ -301,7 +314,7 @@ class UnqliteBenchmark(JsonEncodedBenchmark):
 
 class RocksdictBenchmark(JsonEncodedBenchmark):
     def __init__(self, db_tpl):
-        super().__init__(db_tpl, "rocksdict")
+        super().__init__(db_tpl, "rocksdict", "rocksdict")
         self.batch_available = False
 
     def open(self):
@@ -317,6 +330,7 @@ BENCHMARK_CLASSES = [
     UnqliteBenchmark,
     RocksdictBenchmark,
     GnuDbmBenchmark,
+    ShelveBenchmark,
     SemiDbmBenchmark,
     PysosBenchmark,
     DumbDbmBenchmark,
